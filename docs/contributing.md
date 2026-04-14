@@ -74,10 +74,10 @@ See [docs/evals-guide.md](evals-guide.md) for the full schema and assertion-writ
 
 Quick checklist:
 - [ ] Add the scenario to `evals/evals.json` with a unique `id` and descriptive `name`
-- [ ] Add simulated user responses to `SIMULATED_USER_RESPONSES` in `scripts/run_evals.py`
-  (the key is the eval `name`, the value is a list of strings — one per round)
+- [ ] Add `user_persona` and `user_goal` fields — the LLM user simulator reads these to produce
+  realistic responses (no static response list needed)
 - [ ] Validate structure: `uv run scripts/run_evals.py --dry-run`
-- [ ] Run the new eval: `uv run scripts/run_evals.py --eval <your-eval-name>`
+- [ ] Run the new eval with a transcript to review the simulated session: `uv run scripts/run_evals.py --eval <your-eval-name> --transcript transcripts/<your-eval-name>.md`
 - [ ] Run all evals to check for regressions: `uv run scripts/run_evals.py`
 
 ### 3. Improving the eval runner

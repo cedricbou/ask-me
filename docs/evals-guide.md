@@ -61,6 +61,9 @@ uv run scripts/run_evals.py --verbose
 
 # Save results to JSON
 uv run scripts/run_evals.py --output results.json
+
+# Write a human-readable Markdown transcript of every session
+uv run scripts/run_evals.py --transcript transcripts/run.md
 ```
 
 Exit code: `0` if all evals pass, `1` if any fail.
@@ -234,6 +237,33 @@ If an eval is flaky:
 5. Run `uv run scripts/run_evals.py --dry-run` to validate structure
 6. Run `uv run scripts/run_evals.py --eval your-eval-name --verbose` to inspect behavior
 7. Iterate until the assertions correctly capture the expected behavior
+
+---
+
+## Reviewing transcripts manually
+
+Automated assertions check structure and keywords — they can't tell you whether the *questions
+the agent asked* were actually insightful, or whether the *plan* was well-reasoned. For that,
+you need to read the conversation yourself.
+
+Use `--transcript` to write a full Markdown transcript of every simulated session:
+
+```bash
+uv run scripts/run_evals.py --transcript transcripts/run.md
+
+# Or for a single eval
+uv run scripts/run_evals.py --eval 0 --transcript transcripts/eval-0.md
+```
+
+The transcript file is structured as one `##` section per eval. Each turn is rendered as:
+
+- **`[USER]`** — the initial prompt and each simulated user response
+- **`[TOOL: question]`** — the agent's question tool calls, with options expanded inline
+- **`[TOOL: Write]` / `[TOOL: Edit]` etc.** — other tool calls with their arguments as JSON
+- **`[AGENT]`** — any free-text the agent emitted outside of tool calls
+
+Transcripts are gitignored (`transcripts/` and `*.transcript.md`) — they are for local
+review only and should not be committed.
 
 ---
 

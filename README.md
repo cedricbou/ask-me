@@ -137,7 +137,8 @@ uv run scripts/run_evals.py --eval 0                                   # one eva
 uv run scripts/run_evals.py --category questioning                     # by category
 uv run scripts/run_evals.py --model anthropic/claude-opus-4-5          # override model
 uv run scripts/run_evals.py --verbose                                  # show agent rounds
-uv run scripts/run_evals.py --output results.json                      # save results
+uv run scripts/run_evals.py --output results.json                      # save results to JSON
+uv run scripts/run_evals.py --transcript transcripts/run.md            # write full Markdown transcript
 ```
 
 See [docs/evals-guide.md](docs/evals-guide.md) for a full explanation of the eval system.

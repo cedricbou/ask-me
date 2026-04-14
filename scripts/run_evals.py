@@ -159,6 +159,14 @@ class AssertionResult:
 
 
 @dataclass
+class TranscriptTurn:
+    role: str          # "agent", "tool", "user"
+    tool_name: str = ""
+    content: str = ""
+    tool_input: dict = field(default_factory=dict)
+
+
+@dataclass
 class EvalResult:
     eval_id: int
     eval_name: str
@@ -170,6 +178,7 @@ class EvalResult:
     agent_output: str = ""
     error: str = ""
     duration_ms: int = 0
+    transcript: list[TranscriptTurn] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -743,10 +752,10 @@ def run_agent(
     user_client: OpenAI | None = None,
     user_model: str | None = None,
     verbose: bool = False,
-) -> tuple[list[dict], str]:
+) -> tuple[list[dict], str, list[TranscriptTurn]]:
     """
     Run the agent on the eval prompt and collect tool calls + output.
-    Returns (tool_calls, full_text_output).
+    Returns (tool_calls, full_text_output, transcript_turns).
 
     Uses the OpenAI-compatible API (works with Anthropic, OpenRouter, ZenCode, etc.)
     The simulated user is powered by user_client/user_model (defaults to the same
@@ -761,6 +770,9 @@ def run_agent(
     messages: list[dict] = list(conversation_history) + [{"role": "user", "content": eval_data["prompt"]}]
     all_tool_calls: list[dict] = []
     full_text = ""
+    transcript: list[TranscriptTurn] = [
+        TranscriptTurn(role="user", content=eval_data["prompt"])
+    ]
 
     # Use the same client/model for user simulation unless overridden
     effective_user_client = user_client or client
@@ -800,6 +812,7 @@ def run_agent(
         # Collect text output
         if msg.content:
             full_text += msg.content + "\n"
+            transcript.append(TranscriptTurn(role="agent", content=msg.content))
 
         # Collect tool calls from this round
         tool_uses = []
@@ -826,6 +839,11 @@ def run_agent(
                 }
                 all_tool_calls.append(tool_entry)
                 tool_uses.append(tool_entry)
+                transcript.append(TranscriptTurn(
+                    role="tool",
+                    tool_name=tc.function.name,
+                    tool_input=input_data,
+                ))
                 if verbose:
                     console.print(f"  [cyan]  → {tc.function.name}[/cyan]")
 
@@ -877,6 +895,7 @@ def run_agent(
                         verbose=verbose,
                     )
                 result_content = user_answer
+                transcript.append(TranscriptTurn(role="user", content=user_answer))
             else:
                 result_content = f"[{tc_entry['name']} executed successfully]"
 
@@ -886,7 +905,7 @@ def run_agent(
                 "content": result_content,
             })
 
-    return all_tool_calls, full_text
+    return all_tool_calls, full_text, transcript
 
 
 # ---------------------------------------------------------------------------
@@ -949,6 +968,63 @@ def render_summary(results: list[EvalResult]) -> None:
     console.print(table)
     color = "green" if failed == 0 else "red"
     console.print(f"\n[{color}]{passed}/{total} evals passed[/{color}]")
+
+
+# ---------------------------------------------------------------------------
+# Transcript writer
+# ---------------------------------------------------------------------------
+
+def _render_question_tool(tool_input: dict) -> str:
+    """Render a question tool call in a readable format."""
+    lines = []
+    for q in tool_input.get("questions", []):
+        lines.append(f"> **{q.get('header', '')}** — {q.get('question', '')}")
+        for opt in q.get("options", []):
+            lines.append(f">   - **{opt.get('label', '')}**: {opt.get('description', '')}")
+    return "\n".join(lines)
+
+
+def write_transcript(results: list[EvalResult], path: str) -> None:
+    """Write a human-readable Markdown transcript of all eval conversations."""
+    lines: list[str] = [
+        "# ask-me eval transcripts\n",
+        f"*Generated — {len(results)} eval(s)*\n",
+    ]
+
+    for result in results:
+        status = "PASS" if result.passed else "FAIL"
+        lines.append(f"\n---\n")
+        lines.append(f"## [{result.eval_id}] {result.eval_name}  `{status}`\n")
+        lines.append(f"**Category:** {result.category}  ")
+        lines.append(f"**Duration:** {result.duration_ms}ms\n")
+
+        if result.error:
+            lines.append(f"\n> **Error:** {result.error}\n")
+            continue
+
+        lines.append("\n### Conversation\n")
+
+        for turn in result.transcript:
+            if turn.role == "user":
+                lines.append(f"**[USER]**\n\n{turn.content}\n")
+            elif turn.role == "agent":
+                lines.append(f"**[AGENT]**\n\n{turn.content}\n")
+            elif turn.role == "tool":
+                if turn.tool_name == "question":
+                    lines.append(f"**[TOOL: question]**\n\n{_render_question_tool(turn.tool_input)}\n")
+                else:
+                    # Write/Edit/Bash/Read — show compact JSON args
+                    args_str = json.dumps(turn.tool_input, indent=2, ensure_ascii=False)
+                    lines.append(f"**[TOOL: {turn.tool_name}]**\n\n```json\n{args_str}\n```\n")
+
+        lines.append("\n### Assertion results\n")
+        for ar in result.assertion_results:
+            icon = "✓" if ar.passed else "✗"
+            lines.append(f"- {icon} **{ar.description}** — {ar.evidence}")
+        lines.append("")
+
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text("\n".join(lines), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -1020,6 +1096,16 @@ def parse_args() -> argparse.Namespace:
             "Example: openai/gpt-4.1-mini"
         ),
     )
+    parser.add_argument(
+        "--transcript",
+        "-t",
+        default=None,
+        help=(
+            "Write a human-readable Markdown transcript of every eval conversation "
+            "to this file. Useful for manually reviewing the quality of simulated "
+            "sessions. Example: --transcript transcripts/run.md"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -1054,7 +1140,7 @@ def run_eval(
     start = time.time()
 
     try:
-        tool_calls, agent_output = run_agent(
+        tool_calls, agent_output, transcript = run_agent(
             eval_data, skill_content, client=client, model=model,
             user_client=user_client, user_model=user_model, verbose=verbose
         )
@@ -1077,6 +1163,7 @@ def run_eval(
             tool_calls=tool_calls,
             agent_output=agent_output,
             duration_ms=duration_ms,
+            transcript=transcript,
         )
 
     except Exception as e:
@@ -1144,6 +1231,10 @@ def main() -> None:
         console.print()
 
     render_summary(results)
+
+    if args.transcript:
+        write_transcript(results, args.transcript)
+        console.print(f"\n[dim]Transcript written to {args.transcript}[/dim]")
 
     if args.output:
         output_data = [

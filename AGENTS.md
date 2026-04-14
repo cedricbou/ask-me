@@ -121,6 +121,14 @@ uv run scripts/run_evals.py --model anthropic/claude-opus-4-5
 
 # Dry run (no API)
 uv run scripts/run_evals.py --dry-run
+
+# Write a full Markdown transcript for manual review
+uv run scripts/run_evals.py --transcript transcripts/run.md
 ```
 
 Exit code 0 = all pass. Exit code 1 = at least one failure.
+
+The `--transcript` flag writes a human-readable Markdown file with the full conversation of
+every simulated session — agent text, question tool calls with expanded options, and simulated
+user replies. Use it to verify that the questions and plans the agent produces are actually
+good, not just structurally correct. Transcript files are gitignored.
