@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -43,8 +44,8 @@ jobs:
   evals:
     name: Run Evals
     runs-on: ubuntu-latest
-    # Only run evals when SKILL.md or the eval system changes
     if: |
+      github.event_name == 'workflow_dispatch' ||
       contains(github.event.head_commit.modified, 'SKILL.md') ||
       contains(github.event.head_commit.modified, 'evals/evals.json') ||
       contains(github.event.head_commit.modified, 'scripts/run_evals.py')
