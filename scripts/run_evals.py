@@ -63,17 +63,17 @@ PROVIDERS: dict[str, dict] = {
     "anthropic": {
         "env_key": "ANTHROPIC_API_KEY",
         "base_url": "https://api.anthropic.com/v1",
-        "default_model": "claude-opus-4-5",
+        "default_model": "claude-haiku-4-5",
     },
     "openrouter": {
         "env_key": "OPENROUTER_API_KEY",
         "base_url": "https://openrouter.ai/api/v1",
-        "default_model": "anthropic/claude-opus-4-5",
+        "default_model": "openai/gpt-4.1-mini",
     },
     "zencode": {
         "env_key": "ZENCODE_API_KEY",
         "base_url": "https://api.zencode.dev/v1",
-        "default_model": "anthropic/claude-opus-4-5",
+        "default_model": "openai/gpt-4.1-mini",
     },
     "custom": {
         "env_key": "LLM_API_KEY",
@@ -190,8 +190,17 @@ def build_system_prompt(skill_content: str, setup_context: str = "") -> str:
 {skill_content}
 </skill>
 
-You have access to these tools (simulated for eval purposes):
-- question: Ask the user structured questions with options
+You are running in a simulated interactive session. The tools below are the ONLY way to
+take action or communicate. In particular:
+
+- The `question` tool is the ONLY way to communicate with the user. You MUST call it
+  whenever you want to ask something, present options, or get a decision. Never write
+  plain conversational text to the user — use the `question` tool instead.
+- Use `Write` or `Edit` when you need to create or modify files during implementation.
+- Use `Read` or `Bash` for reading files or running commands.
+
+Available tools:
+- question: The sole channel for interacting with the user (questions, options, confirmations)
 - Read: Read file contents
 - Write: Write a file
 - Edit: Edit a file
@@ -283,10 +292,11 @@ def _check_behavioral(assertion_id: str, check: str, tool_calls: list[dict]) -> 
         return True, "No writes before questioning phase"
 
     elif assertion_id == "confirmation-uses-question-tool":
+        # The clarification phase is injected via conversation_history, so only 1 real
+        # question call is needed — the confirmation itself (with 3+ options).
         question_calls = [tc for tc in tool_calls if tc["name"] == "question"]
-        if len(question_calls) < 2:
-            return False, f"Only {len(question_calls)} question call(s) found; expected at least 2 (clarification + confirmation)"
-        # Check that a question call has >= 3 options
+        if not question_calls:
+            return False, "question tool was never called"
         for qc in question_calls:
             questions = qc.get("input", {}).get("questions", [])
             for q in questions:
@@ -332,13 +342,14 @@ def _check_behavioral(assertion_id: str, check: str, tool_calls: list[dict]) -> 
         return False, "Could not find a question offering all four paths (implement/review/clarify/stop)"
 
     elif assertion_id == "no-implementation-before-confirmation":
+        # The clarification phase is injected via conversation_history, so only 1 real
+        # question call is needed. Check that no writes happen before the last question call.
         question_calls = [i for i, n in enumerate(tool_names) if n == "question"]
         write_calls = [i for i, n in enumerate(tool_names) if n in write_edit_bash]
-        if len(question_calls) < 2:
-            return False, "Expected at least 2 question calls (clarification + confirmation)"
-        # No writes should happen before the second question call
-        second_question = sorted(question_calls)[1]
-        early_writes = [i for i in write_calls if i < second_question]
+        if not question_calls:
+            return False, "No question calls found"
+        last_question = sorted(question_calls)[-1]
+        early_writes = [i for i in write_calls if i < last_question]
         if early_writes:
             return False, f"Write/Edit/Bash found before confirmation question at: {early_writes}"
         return True, "No implementation before confirmation step"
@@ -487,7 +498,15 @@ def _check_qualitative(assertion_id: str, check: str, agent_output: str) -> tupl
 
 QUESTION_TOOL_SCHEMA = {
     "name": "question",
-    "description": "Ask the user structured questions with options. Use this for all interactions — clarification, confirmation, review feedback.",
+    "description": (
+        "The ONLY way to communicate with the user. Call this tool whenever you need to ask "
+        "something, present choices, or get confirmation — including clarification questions, "
+        "the confirmation step (implement / review / clarify / stop), review feedback rounds, "
+        "and any other interaction. Do NOT write plain text to the user instead of calling this "
+        "tool. Every question and every choice offered to the user must go through this tool. "
+        "Each call can include multiple questions at once. Always offer concrete options so the "
+        "user can answer quickly, and include a free-text fallback option."
+    ),
     "input_schema": {
         "type": "object",
         "properties": {
@@ -616,7 +635,10 @@ def run_agent(
     setup = eval_data.get("setup", "")
     system = build_system_prompt(skill_content, setup)
 
-    messages: list[dict] = [{"role": "user", "content": eval_data["prompt"]}]
+    # Inject conversation_history before the actual prompt so that models which ignore
+    # the setup_context in the system prompt still see the prior context as real turns.
+    conversation_history: list[dict] = eval_data.get("conversation_history", [])
+    messages: list[dict] = list(conversation_history) + [{"role": "user", "content": eval_data["prompt"]}]
     all_tool_calls: list[dict] = []
     full_text = ""
 

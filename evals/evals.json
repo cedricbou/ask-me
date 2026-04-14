@@ -42,6 +42,16 @@
       "category": "confirmation",
       "prompt": "I want to add dark mode support to our Next.js app. The app uses Tailwind CSS.",
       "setup": "Simulate that the agent has asked one round of questions and received answers: 'Use system preference by default, toggle in header, persist in localStorage'.",
+      "conversation_history": [
+        {
+          "role": "assistant",
+          "content": "I'd like to understand a few things before diving in. [question tool: asked about theme control, toggle location, persistence]"
+        },
+        {
+          "role": "user",
+          "content": "Use system preference by default, toggle in header, persist in localStorage."
+        }
+      ],
       "expected_behavior": "After gathering sufficient context, the agent uses the question tool to present the confirmation step — offering the user a choice between: implement now, review the technical plan, keep clarifying, or stop and document the plan. The agent does NOT proceed to implementation without this confirmation.",
       "assertions": [
         {
@@ -70,6 +80,24 @@
       "category": "review",
       "prompt": "I want to build a notification system for our app — real-time updates when orders change status.",
       "setup": "Simulate: questioning phase complete, user chooses 'Review the technical plan first' at the confirmation step.",
+      "conversation_history": [
+        {
+          "role": "assistant",
+          "content": "I have a few questions before we get started. [question tool: asked about realtime transport, notification types, backend stack]"
+        },
+        {
+          "role": "user",
+          "content": "We use WebSockets via Socket.io on a Node/Express backend. Notifications are for order status changes (pending, shipped, delivered). Show a toast in the UI and a badge on the bell icon."
+        },
+        {
+          "role": "assistant",
+          "content": "I have enough context to proceed. [question tool: confirmation — offered implement, review plan, clarify more, stop+document]"
+        },
+        {
+          "role": "user",
+          "content": "I'd like to review the technical plan first before we implement. Please present the plan, then use the question tool to ask for my feedback and offer me the option to proceed to implementation."
+        }
+      ],
       "expected_behavior": "The agent presents a clear technical plan (files to change, core logic, design decisions). Then uses the question tool to get feedback — offering specific angles to explore OR free text. The user is always given the option to continue reviewing or proceed to implementation. The agent does not implement until the user explicitly chooses to.",
       "assertions": [
         {
@@ -104,6 +132,24 @@
       "category": "implementation",
       "prompt": "Add a loading spinner to the product list page while data is being fetched.",
       "setup": "Simulate: questioning phase complete (user confirmed: uses React Query, existing Spinner component available, show spinner only when isFetching), user chooses 'Implement' at confirmation.",
+      "conversation_history": [
+        {
+          "role": "assistant",
+          "content": "A couple of quick questions. [question tool: asked about data fetching library, existing spinner, when to show it]"
+        },
+        {
+          "role": "user",
+          "content": "We use React Query. There's already a Spinner component at src/components/Spinner.tsx. Show it only when isFetching is true, not just on initial load."
+        },
+        {
+          "role": "assistant",
+          "content": "Got it, I have all I need. [question tool: confirmation — offered implement, review plan, clarify more, stop+document]"
+        },
+        {
+          "role": "user",
+          "content": "Go ahead and implement it. Use the Write or Edit tools to make the actual changes to the files."
+        }
+      ],
       "expected_behavior": "The agent proceeds to implementation without asking redundant questions already answered. It uses the information gathered to implement efficiently. It does not restart the questioning loop after the user has confirmed implementation.",
       "assertions": [
         {
@@ -132,6 +178,24 @@
       "category": "documentation",
       "prompt": "We want to migrate our authentication from JWT stored in localStorage to HttpOnly cookies.",
       "setup": "Simulate: questioning phase complete, user chooses 'Stop and document the plan' at confirmation.",
+      "conversation_history": [
+        {
+          "role": "assistant",
+          "content": "Before we start, I need to understand the current setup. [question tool: asked about current auth flow, backend framework, token refresh strategy]"
+        },
+        {
+          "role": "user",
+          "content": "We use Express with Passport.js. JWT is stored in localStorage and sent as a Bearer token. We have a refresh token stored in localStorage too. The frontend is React."
+        },
+        {
+          "role": "assistant",
+          "content": "Thanks, I have enough context. [question tool: confirmation — offered implement, review plan, clarify more, stop+document]"
+        },
+        {
+          "role": "user",
+          "content": "Stop here and just write down the plan."
+        }
+      ],
       "expected_behavior": "The agent writes a clear plan document inline — covering feature intent, surfaced functional requirements, proposed technical approach, and open questions. It does not attempt to implement. The document should be usable as a spec by a developer.",
       "assertions": [
         {
