@@ -7,20 +7,28 @@ the way it is, what trade-offs were made, and what should not change when contri
 
 ## The core problem this skill solves
 
-When a user describes a feature to an agent, the agent typically has two failure modes:
+When a user describes a feature to an agent, the agent typically has three failure modes:
 
 1. **Underfitting the spec**: the agent asks no questions, assumes what the user meant, and
    produces something that misses the mark — requiring rework.
 2. **Overfitting the conversation**: the agent asks so many questions that the user gives up
    or loses the context, then starts over.
+3. **Ending the session too early**: the agent implements, then terminates — leaving the user
+   with no way to give feedback or iterate without starting a new (premium) request.
 
-`ask-me` addresses both: it runs a focused questioning phase to surface the most important
-unknowns, then transitions directly into implementation — all within the same session.
+`ask-me` addresses all three: it runs a focused questioning phase to surface the most important
+unknowns, transitions into implementation, then loops back for feedback — all within the same
+session.
 
 The key constraint is **one premium request**. Agents like OpenCode or Claude Code bill per
 session (conversation turn). If the agent ends the session to "think" or ask the user to
 start a new request, the context is lost. The `question` tool solves this: it lets the
 agent collect structured input from the user without ending the current request.
+
+The value compounds in the feedback loop: after implementing, the agent asks for feedback
+via the `question` tool, applies corrections, and checks in again — all within the same
+premium request. This is the difference between one-shot code generation and an actual
+pair-programming session.
 
 ---
 
@@ -72,25 +80,33 @@ specific failure it addresses, then phrase it as principle + reasoning rather th
 
 ---
 
-## The four-phase structure
+## The five-phase structure
 
-The skill has four named phases:
+The skill has five named phases arranged as a loop:
 
 1. **Questioning** — collect context via the `question` tool
 2. **Confirmation** — offer the user a choice of next step (implement / review / clarify / stop)
 3. **Review** (optional) — share the plan, iterate on it via the `question` tool
 4. **Action** — implement or document
+5. **Feedback & Iteration** — use the `question` tool to collect feedback, then loop
 
-This structure is fixed. It represents the minimum viable workflow for framing a feature
-correctly. Removing any phase breaks a user scenario:
+The key insight is that the workflow is **cyclic, not linear**. Phase 5 loops back:
+- Feedback received → apply changes → return to Phase 5
+- New task requested → return to Phase 1
+- User says "done" → session ends
+
+This structure is fixed. It represents the minimum viable workflow for getting the full value
+out of a single premium request. Removing any phase breaks a user scenario:
 
 - Without Questioning: the agent codes blind
 - Without Confirmation: the agent codes without consent
 - Without Review: the user can't validate the approach before commits are made
 - Without Action: the skill never delivers anything
+- Without Feedback: the session ends prematurely, wasting the single-request advantage
 
-The phases can have different weights (more questioning rounds, deeper review) — but all four
-must exist.
+The phases can have different weights (more questioning rounds, deeper review) — but all five
+must exist. Phase 5 in particular is what transforms the skill from "ask before coding" into
+"complete development cycle in one request."
 
 ---
 
@@ -146,21 +162,23 @@ The evals include a French-language scenario (`language-adaptation`) to catch re
 
 ## What the evals cover
 
-The 6 eval scenarios map to the four phases:
+The 7 eval scenarios map to the five phases:
 
 | Scenario | Phase tested |
 |---|---|
 | `basic-feature-request-questioning` | Phase 1 — questioning starts immediately |
 | `confirmation-step-offered` | Phase 2 — confirmation uses `question` with 4 options |
 | `technical-review-flow` | Phase 3 — review uses `question`, no premature implementation |
-| `implement-path` | Phase 4 — implementation without redundant questions |
-| `stop-and-document-path` | Phase 4 — plan written, no implementation |
+| `implement-path` | Phase 4+5 — implementation followed by feedback question |
+| `stop-and-document-path` | Phase 4+5 — plan written, then feedback question |
 | `language-adaptation` | Cross-cutting — language inheritance |
+| `feedback-iteration-loop` | Phase 5 — feedback received, changes applied, loop continues |
 
 Gaps not currently covered:
 - Multiple rounds of questioning (agent asks follow-up questions)
 - The agent choosing to stop questioning early (confident after one round)
 - Edge cases where the `question` tool is unavailable
+- Multi-task sessions (user requests a new task after completing one)
 
 ---
 

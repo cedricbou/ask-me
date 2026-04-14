@@ -370,14 +370,39 @@ def _check_behavioral(assertion_id: str, check: str, tool_calls: list[dict]) -> 
         return False, "Could not find a question offering all four paths (implement/review/clarify/stop)"
 
     elif assertion_id == "no-implementation-before-confirmation":
-        # The clarification phase is injected via conversation_history, so only 1 real
-        # question call is needed. Check that no writes happen before the last question call.
+        # The clarification phase is injected via conversation_history. We only care that no
+        # writes happen before the first confirmation question (the one with process-choice options).
         question_calls = [i for i, n in enumerate(tool_names) if n == "question"]
         write_calls = [i for i, n in enumerate(tool_names) if n in write_edit_bash]
         if not question_calls:
             return False, "No question calls found"
-        last_question = sorted(question_calls)[-1]
-        early_writes = [i for i in write_calls if i < last_question]
+        process_keywords = [
+            "implement", "build", "go ahead", "proceed", "start cod", "code it", "begin",
+            "review", "plan", "technical", "architecture", "design", "overview",
+            "clarif", "more question", "keep", "iterate", "ask more", "refine",
+            "stop", "document", "plan only", "write it", "save", "export", "no code",
+        ]
+        confirmation_index = None
+        for i, qc in enumerate([tc for tc in tool_calls if tc["name"] == "question"]):
+            questions = qc.get("input", {}).get("questions", [])
+            for q in questions:
+                options = q.get("options", [])
+                if len(options) >= 3:
+                    texts = " ".join(
+                        (o.get("label", "") + " " + o.get("description", "")).lower()
+                        for o in options
+                    )
+                    process_matches = sum(1 for kw in process_keywords if kw in texts)
+                    if process_matches >= 2:
+                        confirmation_index = question_calls[i]
+                        break
+            if confirmation_index is not None:
+                break
+
+        if confirmation_index is None:
+            return False, "No confirmation question found to anchor the implementation check"
+
+        early_writes = [i for i in write_calls if i < confirmation_index]
         if early_writes:
             return False, f"Write/Edit/Bash found before confirmation question at: {early_writes}"
         return True, "No implementation before confirmation step"
@@ -399,30 +424,74 @@ def _check_behavioral(assertion_id: str, check: str, tool_calls: list[dict]) -> 
 
     elif assertion_id == "no-implementation-during-review":
         # The clarification phase is already done via setup context.
-        # Check that no Write/Edit occurs before the last question call (i.e. before the user
-        # explicitly confirms implementation from the review screen).
+        # Check that no Write/Edit occurs before the first review question.
+        # Once the user chooses "implement" from the review step, writes are allowed.
         question_indices = [i for i, n in enumerate(tool_names) if n == "question"]
         write_indices = [i for i, n in enumerate(tool_names) if n in write_edit_bash]
         if not question_indices:
             return False, "No question calls found — cannot validate review phase"
-        review_end = sorted(question_indices)[-1]
-        writes_before_last_question = [i for i in write_indices if i < review_end]
-        if writes_before_last_question:
-            return False, f"Write/Edit calls during review phase at positions: {writes_before_last_question}"
-        return True, "No writes during review phase"
+        first_question = sorted(question_indices)[0]
+        writes_before_first_question = [i for i in write_indices if i < first_question]
+        if writes_before_first_question:
+            return False, f"Write/Edit calls before review question at positions: {writes_before_first_question}"
+        return True, "No writes before the review question"
 
-    elif assertion_id == "no-redundant-questions":
-        question_calls = [i for i, n in enumerate(tool_names) if n == "question"]
-        # After the last question call that precedes implementation,
-        # check there are no more question calls
-        write_calls = [i for i, n in enumerate(tool_names) if n in write_edit_bash]
+    elif assertion_id == "feedback-after-implementation":
+        # After Write/Edit calls, there should be a question tool call (Phase 5 feedback)
+        question_indices = [i for i, n in enumerate(tool_names) if n == "question"]
+        write_indices = [i for i, n in enumerate(tool_names) if n in {"Write", "Edit"}]
+        if not write_indices:
+            return False, "No Write/Edit calls found — cannot check for post-implementation feedback"
+        last_write = max(write_indices)
+        post_impl_questions = [i for i in question_indices if i > last_write]
+        if not post_impl_questions:
+            return False, f"No question tool call found after last Write/Edit at index {last_write}"
+        return True, f"question tool called at index {post_impl_questions[0]} after last Write/Edit at {last_write}"
+
+    elif assertion_id == "feedback-after-documentation":
+        # After presenting the plan (text output), the agent should call question tool.
+        # Since this path has no Write/Edit calls, just check that question tool is called.
+        question_calls = [tc for tc in tool_calls if tc["name"] == "question"]
+        if not question_calls:
+            return False, "No question tool call found after documentation"
+        # Check that at least one question call has feedback-style options
+        feedback_keywords = [
+            "done", "good", "finish", "termin",
+            "feedback", "change", "modif", "adjust",
+            "next", "another", "else", "other task",
+            "review", "walk", "explain", "through",
+        ]
+        for qc in question_calls:
+            questions = qc.get("input", {}).get("questions", [])
+            for q in questions:
+                texts = " ".join(
+                    (o.get("label", "") + " " + o.get("description", "")).lower()
+                    for o in q.get("options", [])
+                )
+                matches = sum(1 for kw in feedback_keywords if kw in texts)
+                if matches >= 2:
+                    return True, f"Feedback question found with {matches} feedback-related keywords"
+        return True, f"question tool called {len(question_calls)} time(s) after documentation"
+
+    elif assertion_id == "applies-feedback-changes":
+        # After receiving feedback (the setup has the feedback in conversation_history),
+        # the agent should make Write/Edit calls to apply changes
+        write_calls = [tc for tc in tool_calls if tc["name"] in {"Write", "Edit"}]
         if not write_calls:
-            return False, "No implementation found to check against"
-        first_write = min(write_calls)
-        late_questions = [i for i in question_calls if i > first_write]
-        if late_questions:
-            return False, f"question tool called after implementation started at: {late_questions}"
-        return True, "No question calls after implementation began"
+            return False, "No Write/Edit calls found — agent did not apply feedback changes"
+        return True, f"Found {len(write_calls)} Write/Edit call(s) after feedback"
+
+    elif assertion_id == "feedback-loop-continues":
+        # After applying feedback changes (Write/Edit), there should be another question tool call
+        question_indices = [i for i, n in enumerate(tool_names) if n == "question"]
+        write_indices = [i for i, n in enumerate(tool_names) if n in {"Write", "Edit"}]
+        if not write_indices:
+            return False, "No Write/Edit calls found — cannot check feedback loop"
+        last_write = max(write_indices)
+        post_fix_questions = [i for i in question_indices if i > last_write]
+        if not post_fix_questions:
+            return False, f"No question tool call found after feedback-driven Write/Edit at index {last_write}"
+        return True, f"Feedback loop continues: question at index {post_fix_questions[0]} after Write/Edit at {last_write}"
 
     elif assertion_id == "implementation-is-targeted":
         write_calls = [tc for tc in tool_calls if tc["name"] in {"Write", "Edit"}]

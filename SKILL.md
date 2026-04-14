@@ -13,18 +13,29 @@ description: >
 
 # ask-me
 
-A skill for framing a development task through structured questioning before implementing.
+A skill for running a complete develop–feedback–iterate cycle in a single conversation turn.
 
-The core idea: rushing into code when the spec is fuzzy produces rework. Using question tool
-in order to use a single model query, this skill slows you down just enough to surface what's
-missing — then accelerates through implementation with full context.
+The core idea: the `question` tool lets you interact with the user without ending the current
+request. This means one premium request can cover the full lifecycle — framing, planning,
+implementing, getting feedback, iterating, and polishing — instead of just one step.
+
+This is valuable because agent platforms (Copilot, Claude Code, OpenCode) bill per request.
+A single request that covers framing *and* implementation *and* iteration delivers far more
+value than three separate requests that each lose context. The `question` tool is what makes
+this possible: every time you call it, the user responds and you continue — same session,
+same context, same billing unit.
+
+The workflow is a loop, not a line. You keep cycling through phases until the user is
+satisfied and explicitly chooses to end the session. Never end the session yourself.
+After any action — implementation or documentation — the next move is to ask for feedback
+with the `question` tool, unless the user has explicitly said they are done.
 
 ## How to use this skill
 
 When the user invokes this skill (or when you recognize a vague feature request), begin
 a questioning session using the `question` tool. Your goal is to understand the feature
 well enough to write a confident implementation plan. Then implement — or hand off the plan —
-based on what the user chooses.
+based on what the user chooses. Then collect feedback and iterate.
 
 Follow the workflow defined in the phases below.
 
@@ -88,18 +99,60 @@ them respond freely. Always offer:
 - Continue reviewing (more questions/discussion)
 - Implement now (proceed with the current plan)
 
+Use those exact intent labels in every review question: one option to keep reviewing and one
+option labeled exactly `Implement now`. Do not soften or rename that option.
+
 Stay in review mode until the user explicitly moves to implementation.
+Do not start writing code while you are still in review mode; keep this phase to plan + feedback
+only until the user picks implement.
 
 ---
 
-## Phase 4: Implementation or Documentation
+## Phase 4: Action
 
 **If the user chooses to implement:** Build it. Use everything you've learned during the
 questioning phase. Don't ask redundant questions you already answered.
+As soon as the implementation is complete, immediately ask the Phase 5 feedback question.
+Do not wait for a new user message or end the session.
+When the user chooses implement, the next tool call should be `Write` or `Edit`.
+Do not ask another question before making the code change.
 
 **If the user chooses to stop and document:** Write a clear plan document covering the feature
 intent, functional requirements surfaced, the proposed technical approach, and any open questions.
-Present it inline in the conversation.
+Present it inline in the conversation. Treat "document" as conversation output, not a file to
+create or edit.
+
+Do not stop after presenting the plan. Even when the user asks to document only, move to
+Phase 5 and ask for feedback so the session can continue if the user wants changes.
+
+Then move to Phase 5 — always.
+
+---
+
+## Phase 5: Feedback & Iteration
+
+After completing the action (implementation or documentation), use the `question` tool to
+check in with the user. This phase happens every time, including after "stop and document".
+This is where the single-request value compounds: the user can review what you did and steer
+the next step — without starting a new request.
+
+Use the `question` tool to offer:
+
+```
+Options to offer (always use the question tool for this):
+1. Looks good — we're done
+2. I have feedback — let me tell you what to change
+3. Next task — let's tackle something else while we're here
+4. Review what was done — walk me through the changes
+```
+
+If the user gives feedback, apply the changes, then come back to this phase again.
+If the user has a next task, loop back to Phase 1 with the new task.
+If the user asks for a review, explain what you did and return to this phase.
+
+Only end the session when the user explicitly says they're done. Until then, keep the
+loop alive by always returning to a `question` tool call after completing work. This is
+the entire point of the skill: one request, full cycle, no wasted context.
 
 ---
 

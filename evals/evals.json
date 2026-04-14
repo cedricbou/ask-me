@@ -1,7 +1,7 @@
 {
   "skill_name": "ask-me",
-  "version": "1.0.0",
-  "description": "Eval suite for the ask-me skill. Each scenario validates that the agent correctly uses the question tool to frame, plan, and optionally implement a feature — all within a single session. Scenarios cover the key flow branches: questioning, confirmation, technical review, implementation, and stopping with a plan.",
+  "version": "2.0.0",
+  "description": "Eval suite for the ask-me skill. Each scenario validates that the agent correctly uses the question tool to frame, plan, implement, and iterate on a feature — all within a single session. Scenarios cover the key flow branches: questioning, confirmation, technical review, implementation with feedback loop, and stopping with a plan.",
   "evals": [
     {
       "id": 0,
@@ -111,7 +111,7 @@
         },
         {
           "role": "assistant",
-          "content": "I have enough context to proceed. [question tool: confirmation — offered implement, review plan, clarify more, stop+document]"
+          "content": "I have enough context to draft the plan: add a Socket.io notification listener, persist notifications, and wire the toast/badge UI. [question tool: confirmation — offered implement, review plan, clarify more, stop+document]"
         },
         {
           "role": "user",
@@ -161,7 +161,7 @@
         },
         {
           "role": "user",
-          "content": "We use React Query. There's already a Spinner component at src/components/Spinner.tsx. Show it only when isFetching is true, not just on initial load."
+          "content": "We use React Query. There's already a Spinner component at src/components/Spinner.tsx. Show it only when isFetching is true, not just on initial load. The product list page is src/app/products/page.tsx."
         },
         {
           "role": "assistant",
@@ -173,14 +173,14 @@
         }
       ],
       "user_persona": "Frontend developer using React with React Query. The codebase already has a Spinner component at src/components/Spinner.tsx.",
-      "user_goal": "The agent should implement now without asking more questions. If it asks anything, tell it to just proceed with the implementation using Write/Edit tools.",
-      "expected_behavior": "The agent proceeds to implementation without asking redundant questions already answered. It uses the information gathered to implement efficiently. It does not restart the questioning loop after the user has confirmed implementation.",
+      "user_goal": "The agent should implement now. After implementation, when the agent asks for feedback via the question tool, say 'Looks good, we're done'.",
+      "expected_behavior": "The agent proceeds to implementation without re-asking questions already answered. It uses the information gathered to implement efficiently. After implementing, it uses the question tool to collect feedback (Phase 5) instead of ending the session.",
       "assertions": [
         {
-          "id": "no-redundant-questions",
-          "description": "Agent does not re-ask questions already answered during the questioning phase",
+          "id": "implementation-is-targeted",
+          "description": "Agent modifies the right file(s) based on context gathered",
           "type": "behavioral",
-          "check": "no question tool calls after user selects 'implement' at confirmation"
+          "check": "Write or Edit tool calls are made to implement the feature"
         },
         {
           "id": "uses-gathered-context",
@@ -189,10 +189,10 @@
           "check": "implementation references React Query's isFetching/isLoading and the existing Spinner component"
         },
         {
-          "id": "implementation-is-targeted",
-          "description": "Agent modifies the right file(s) based on context gathered",
+          "id": "feedback-after-implementation",
+          "description": "Agent uses question tool after implementation to collect feedback (Phase 5)",
           "type": "behavioral",
-          "check": "Write or Edit tool calls are made to implement the feature"
+          "check": "question tool is called after Write/Edit tool calls"
         }
       ]
     },
@@ -221,8 +221,8 @@
         }
       ],
       "user_persona": "Tech lead planning a security migration. Uses Express/Passport.js with React frontend. Wants a written plan to share with the team before any code is touched.",
-      "user_goal": "The agent should document the plan without implementing anything. If it asks questions, redirect it to just write the plan.",
-      "expected_behavior": "The agent writes a clear plan document inline — covering feature intent, surfaced functional requirements, proposed technical approach, and open questions. It does not attempt to implement. The document should be usable as a spec by a developer.",
+      "user_goal": "The agent should document the plan without implementing anything. After documenting, when the agent asks for feedback via the question tool, say 'Looks good, we're done'.",
+      "expected_behavior": "The agent writes a clear plan document inline — covering feature intent, surfaced functional requirements, proposed technical approach, and open questions. It does not attempt to implement. After documenting, it uses the question tool to check in with the user (Phase 5).",
       "assertions": [
         {
           "id": "no-implementation-on-stop",
@@ -241,6 +241,12 @@
           "description": "Plan is specific enough for a developer to act on — not vague bullet points",
           "type": "qualitative",
           "check": "plan mentions specific areas of the codebase that need changes (auth middleware, token handling, cookie configuration)"
+        },
+        {
+          "id": "feedback-after-documentation",
+          "description": "Agent uses question tool after writing the plan to check in with the user (Phase 5)",
+          "type": "behavioral",
+          "check": "question tool is called after plan is presented"
         }
       ]
     },
@@ -264,6 +270,86 @@
           "description": "Language adaptation does not prevent proper use of the question tool",
           "type": "behavioral",
           "check": "question tool is called at least once"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "feedback-iteration-loop",
+      "category": "iteration",
+      "prompt": "Can you also add a clear button to reset the search and make the search case-insensitive?",
+      "setup": "Simulate: full cycle — questioning done, confirmation done, implementation done. The agent should now be in Phase 5 (feedback). The user will give feedback requesting a change, and the agent should iterate.",
+      "conversation_history": [
+        {
+          "role": "assistant",
+          "content": "A couple of questions before we start. [question tool: asked about search behavior, debounce, which fields to search]"
+        },
+        {
+          "role": "user",
+          "content": "Search by name and email. Client-side filtering is fine for now, we have <500 users. No debounce needed."
+        },
+        {
+          "role": "assistant",
+          "content": "Got it. [question tool: confirmation — offered implement, review plan, clarify more, stop+document]"
+        },
+        {
+          "role": "user",
+          "content": "Implement it."
+        },
+        {
+          "role": "assistant",
+          "content": "I've added the search bar to the user list page. It filters users by name and email as you type.",
+          "tool_calls": [
+            {
+              "id": "call_impl_1",
+              "type": "function",
+              "function": {
+                "name": "Write",
+                "arguments": "{\"filePath\": \"src/pages/UserList.tsx\", \"content\": \"// search bar implementation\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_impl_1",
+          "content": "[Write executed successfully]"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_feedback_1",
+              "type": "function",
+              "function": {
+                "name": "question",
+                "arguments": "{\"questions\":[{\"question\":\"I've implemented the search bar. How does it look?\",\"header\":\"Feedback\",\"options\":[{\"label\":\"Looks good — we're done\",\"description\":\"The implementation meets the requirements\"},{\"label\":\"I have feedback\",\"description\":\"Let me tell you what to change\"},{\"label\":\"Next task\",\"description\":\"Let's tackle something else while we're here\"},{\"label\":\"Review what was done\",\"description\":\"Walk me through the changes you made\"}]}]}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_feedback_1",
+          "content": "I have feedback — can you also add a clear button to reset the search? And make the search case-insensitive."
+        }
+      ],
+      "user_persona": "Frontend developer working on an admin panel. Pragmatic, gives concrete feedback.",
+      "user_goal": "Give feedback on the implementation. After the agent iterates and asks for feedback again, say 'Looks good, we're done'.",
+      "expected_behavior": "The agent receives feedback, applies the changes (adds clear button, makes search case-insensitive), then uses the question tool again to check in. It does not end the session after applying the fix — it loops back to Phase 5.",
+      "assertions": [
+        {
+          "id": "applies-feedback-changes",
+          "description": "Agent makes code changes in response to user feedback",
+          "type": "behavioral",
+          "check": "Write or Edit tool calls are made after receiving feedback"
+        },
+        {
+          "id": "feedback-loop-continues",
+          "description": "Agent uses question tool again after applying feedback changes (doesn't end session)",
+          "type": "behavioral",
+          "check": "question tool is called after the feedback-driven Write/Edit calls"
         }
       ]
     }

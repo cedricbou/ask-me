@@ -59,8 +59,9 @@ Read `docs/skill-design.md` for the full reasoning. Key points:
    tells the agent WHEN to use the skill. It intentionally does not summarize the workflow — that
    would cause the agent to follow the description instead of reading the full skill body.
 
-4. **Four phases, one session.** Questioning → Confirmation → (optional) Review → Implementation
-   or Documentation. The session never ends in the middle; the `question` tool keeps it alive.
+4. **Five phases, one session, cyclic.** Questioning → Confirmation → (optional) Review →
+   Action → Feedback & Iteration. The session loops (feedback → corrections → feedback)
+   until the user explicitly ends it. The `question` tool keeps the session alive.
 
 ---
 
@@ -77,9 +78,8 @@ Read `docs/skill-design.md` for the full reasoning. Key points:
 ### Adding a new eval scenario
 
 1. Add the scenario to `evals/evals.json` (see `docs/evals-guide.md` for the schema)
-2. Add simulated user responses to `SIMULATED_USER_RESPONSES` in `scripts/run_evals.py`
-3. Run `uv run scripts/run_evals.py --dry-run` to validate structure
-4. Run `uv run scripts/run_evals.py --eval <your-new-eval-name>` to test it
+2. Run `uv run scripts/run_evals.py --dry-run` to validate structure
+3. Run `uv run scripts/run_evals.py --eval <your-new-eval-name>` to test it
 
 ### Releases
 
@@ -93,7 +93,7 @@ Do NOT manually edit `CHANGELOG.md`.
 ## What you should NOT change
 
 - The `name` field in `SKILL.md` frontmatter — it's the install identifier
-- The four-phase structure of the skill (Questioning → Confirmation → Review → Action)
+- The five-phase cyclic structure of the skill (Questioning → Confirmation → Review → Action → Feedback)
 - The requirement to use the `question` tool for all user interaction
 - The `metadata.internal` flag (not set — this skill is public)
 
