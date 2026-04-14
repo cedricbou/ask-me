@@ -294,15 +294,30 @@ def _check_behavioral(assertion_id: str, check: str, tool_calls: list[dict]) -> 
     elif assertion_id == "confirmation-uses-question-tool":
         # The clarification phase is injected via conversation_history, so only 1 real
         # question call is needed — the confirmation itself (with 3+ options).
+        # Verify the options relate to process choices (implement/review/clarify/stop),
+        # not just any question with 3+ options.
+        process_keywords = [
+            "implement", "build", "go ahead", "proceed", "start cod", "code it", "begin",
+            "review", "plan", "technical", "architecture", "design", "overview",
+            "clarif", "more question", "keep", "iterate", "ask more", "refine",
+            "stop", "document", "plan only", "write it", "save", "export", "no code",
+        ]
         question_calls = [tc for tc in tool_calls if tc["name"] == "question"]
         if not question_calls:
             return False, "question tool was never called"
         for qc in question_calls:
             questions = qc.get("input", {}).get("questions", [])
             for q in questions:
-                if len(q.get("options", [])) >= 3:
-                    return True, f"Confirmation question has {len(q.get('options', []))} options"
-        return False, "No question call found with 3+ options for confirmation"
+                options = q.get("options", [])
+                if len(options) >= 3:
+                    texts = " ".join(
+                        (o.get("label", "") + " " + o.get("description", "")).lower()
+                        for o in options
+                    )
+                    process_matches = sum(1 for kw in process_keywords if kw in texts)
+                    if process_matches >= 2:
+                        return True, f"Confirmation question has {len(options)} process-choice options"
+        return False, "No question call found with 3+ process-choice options for confirmation"
 
     elif assertion_id == "review-uses-question-tool":
         # In the review flow the clarification phase is already done (injected via setup),
@@ -751,6 +766,12 @@ def run_agent(
     effective_user_client = user_client or client
     effective_user_model = user_model or model
 
+    # Optional: after N question rounds, inject a fixed "move on" message instead of
+    # the LLM sim.  This lets us test that the agent can present the confirmation step
+    # when the user explicitly asks for it — which is the realistic scenario.
+    force_confirmation_after = eval_data.get("force_confirmation_after", 0)
+    question_round_count = 0
+
     # Convert tool schemas to OpenAI format (rename input_schema → parameters)
     openai_tools = []
     for t in ALL_TOOLS:
@@ -838,14 +859,23 @@ def run_agent(
         # Build tool results
         for tc_entry in tool_uses:
             if tc_entry["name"] == "question":
-                user_answer = simulate_user_response(
-                    question_input=tc_entry["input"],
-                    eval_data=eval_data,
-                    conversation_so_far=messages,
-                    client=effective_user_client,
-                    model=effective_user_model,
-                    verbose=verbose,
-                )
+                question_round_count += 1
+                if force_confirmation_after and question_round_count > force_confirmation_after:
+                    user_answer = (
+                        "I think you have enough context now. What are my options? "
+                        "Can I implement, review the plan, keep clarifying, or just document it?"
+                    )
+                    if verbose:
+                        console.print(f"  [yellow]  ← forced pushback (round {question_round_count})[/yellow]")
+                else:
+                    user_answer = simulate_user_response(
+                        question_input=tc_entry["input"],
+                        eval_data=eval_data,
+                        conversation_so_far=messages,
+                        client=effective_user_client,
+                        model=effective_user_model,
+                        verbose=verbose,
+                    )
                 result_content = user_answer
             else:
                 result_content = f"[{tc_entry['name']} executed successfully]"

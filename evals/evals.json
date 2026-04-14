@@ -69,8 +69,9 @@
           "content": "Use system preference by default with manual override. Toggle in the header. Persist in localStorage."
         }
       ],
+      "force_confirmation_after": 3,
       "user_persona": "Fullstack developer building a Next.js app with Tailwind CSS. Comfortable with React hooks and CSS-in-JS but wants guidance on the dark mode implementation approach.",
-      "user_goal": "Answer the agent's first 2-3 rounds of questions briefly. After round 3, instead of answering more questions, say: 'I think you have enough context. Can you summarize what you've gathered and show me the next steps — should I implement, review the plan, keep clarifying, or just document it?' This should trigger the confirmation step. When the confirmation is presented, pick 'implement'.",
+      "user_goal": "Answer the agent's questions briefly. When the agent presents a confirmation step with options like implement/review/clarify/stop, pick 'implement'.",
       "expected_behavior": "After gathering sufficient context, the agent uses the question tool to present the confirmation step — offering the user a choice between: implement now, review the technical plan, keep clarifying, or stop and document the plan. The agent does NOT proceed to implementation without this confirmation.",
       "assertions": [
         {
