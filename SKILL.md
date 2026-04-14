@@ -15,9 +15,9 @@ description: >
 
 A skill for framing a development task through structured questioning before implementing.
 
-The core idea: rushing into code when the spec is fuzzy produces rework. This skill slows you
-down just enough to surface what's missing — then accelerates through implementation with
-full context.
+The core idea: rushing into code when the spec is fuzzy produces rework. Using question tool
+in order to use a single model query, this skill slows you down just enough to surface what's
+missing — then accelerates through implementation with full context.
 
 ## How to use this skill
 
@@ -25,6 +25,8 @@ When the user invokes this skill (or when you recognize a vague feature request)
 a questioning session using the `question` tool. Your goal is to understand the feature
 well enough to write a confident implementation plan. Then implement — or hand off the plan —
 based on what the user chooses.
+
+Follow the workflow defined in the phases below.
 
 Communicate in the same language as the user throughout the session.
 
