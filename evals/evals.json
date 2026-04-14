@@ -1,0 +1,179 @@
+{
+  "skill_name": "ask-me",
+  "version": "1.0.0",
+  "description": "Eval suite for the ask-me skill. Each scenario validates that the agent correctly uses the question tool to frame, plan, and optionally implement a feature — all within a single session. Scenarios cover the key flow branches: questioning, confirmation, technical review, implementation, and stopping with a plan.",
+  "evals": [
+    {
+      "id": 0,
+      "name": "basic-feature-request-questioning",
+      "category": "questioning",
+      "prompt": "I want to add a 'request a quote' button to the homepage of our React app.",
+      "expected_behavior": "The agent launches a questioning session using the question tool. It asks relevant clarifying questions about the feature (where exactly on the homepage, what happens when clicked, form fields needed, backend integration, etc.). It does NOT start implementing immediately. It offers concrete options in the question tool while allowing free-text answers.",
+      "assertions": [
+        {
+          "id": "uses-question-tool",
+          "description": "Agent uses the question tool at least once before any implementation",
+          "type": "behavioral",
+          "check": "question tool is called before any file read/write/edit operations"
+        },
+        {
+          "id": "no-premature-implementation",
+          "description": "Agent does not write or edit any files before asking clarifying questions",
+          "type": "behavioral",
+          "check": "no Write/Edit tool calls occur during Phase 1"
+        },
+        {
+          "id": "questions-are-relevant",
+          "description": "Questions asked are genuinely relevant to implementing the feature (not generic filler questions)",
+          "type": "qualitative",
+          "check": "at least one question targets functional behavior (what happens on click, form fields, routing) and at least one targets technical context (existing components, backend integration)"
+        },
+        {
+          "id": "options-are-concrete",
+          "description": "Question options are specific and reflect real trade-offs, not vague yes/no",
+          "type": "qualitative",
+          "check": "options offered reflect meaningful choices the user would actually need to make"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "name": "confirmation-step-offered",
+      "category": "confirmation",
+      "prompt": "I want to add dark mode support to our Next.js app. The app uses Tailwind CSS.",
+      "setup": "Simulate that the agent has asked one round of questions and received answers: 'Use system preference by default, toggle in header, persist in localStorage'.",
+      "expected_behavior": "After gathering sufficient context, the agent uses the question tool to present the confirmation step — offering the user a choice between: implement now, review the technical plan, keep clarifying, or stop and document the plan. The agent does NOT proceed to implementation without this confirmation.",
+      "assertions": [
+        {
+          "id": "confirmation-uses-question-tool",
+          "description": "Confirmation step uses the question tool (not just a text message asking 'shall I proceed?')",
+          "type": "behavioral",
+          "check": "question tool is called for the confirmation step with at least 3 options presented"
+        },
+        {
+          "id": "offers-all-four-paths",
+          "description": "Confirmation offers all four paths: implement, review plan, clarify more, stop+document",
+          "type": "behavioral",
+          "check": "options array contains choices corresponding to: implement, review plan, iterate/clarify, stop"
+        },
+        {
+          "id": "no-implementation-before-confirmation",
+          "description": "No code is written before the user responds to the confirmation question",
+          "type": "behavioral",
+          "check": "no Write/Edit/Bash tool calls between last question round and confirmation step"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "technical-review-flow",
+      "category": "review",
+      "prompt": "I want to build a notification system for our app — real-time updates when orders change status.",
+      "setup": "Simulate: questioning phase complete, user chooses 'Review the technical plan first' at the confirmation step.",
+      "expected_behavior": "The agent presents a clear technical plan (files to change, core logic, design decisions). Then uses the question tool to get feedback — offering specific angles to explore OR free text. The user is always given the option to continue reviewing or proceed to implementation. The agent does not implement until the user explicitly chooses to.",
+      "assertions": [
+        {
+          "id": "plan-is-structured",
+          "description": "Technical plan covers: what changes, core logic, design decisions, uncertainties",
+          "type": "qualitative",
+          "check": "plan mentions specific files or components, describes the implementation approach, and notes at least one design decision or trade-off"
+        },
+        {
+          "id": "review-uses-question-tool",
+          "description": "After presenting the plan, agent uses question tool to solicit feedback",
+          "type": "behavioral",
+          "check": "question tool is called after plan presentation"
+        },
+        {
+          "id": "review-offers-implement-path",
+          "description": "During review, user is always offered the option to proceed to implementation",
+          "type": "behavioral",
+          "check": "question options include an 'implement now' or equivalent choice in every review round"
+        },
+        {
+          "id": "no-implementation-during-review",
+          "description": "Agent does not write code during the review phase without explicit user confirmation",
+          "type": "behavioral",
+          "check": "no Write/Edit tool calls during review rounds"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "implement-path",
+      "category": "implementation",
+      "prompt": "Add a loading spinner to the product list page while data is being fetched.",
+      "setup": "Simulate: questioning phase complete (user confirmed: uses React Query, existing Spinner component available, show spinner only when isFetching), user chooses 'Implement' at confirmation.",
+      "expected_behavior": "The agent proceeds to implementation without asking redundant questions already answered. It uses the information gathered to implement efficiently. It does not restart the questioning loop after the user has confirmed implementation.",
+      "assertions": [
+        {
+          "id": "no-redundant-questions",
+          "description": "Agent does not re-ask questions already answered during the questioning phase",
+          "type": "behavioral",
+          "check": "no question tool calls after user selects 'implement' at confirmation"
+        },
+        {
+          "id": "uses-gathered-context",
+          "description": "Implementation uses information from the questioning phase (React Query, existing Spinner, isFetching)",
+          "type": "qualitative",
+          "check": "implementation references React Query's isFetching/isLoading and the existing Spinner component"
+        },
+        {
+          "id": "implementation-is-targeted",
+          "description": "Agent modifies the right file(s) based on context gathered",
+          "type": "behavioral",
+          "check": "Write or Edit tool calls are made to implement the feature"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "stop-and-document-path",
+      "category": "documentation",
+      "prompt": "We want to migrate our authentication from JWT stored in localStorage to HttpOnly cookies.",
+      "setup": "Simulate: questioning phase complete, user chooses 'Stop and document the plan' at confirmation.",
+      "expected_behavior": "The agent writes a clear plan document inline — covering feature intent, surfaced functional requirements, proposed technical approach, and open questions. It does not attempt to implement. The document should be usable as a spec by a developer.",
+      "assertions": [
+        {
+          "id": "no-implementation-on-stop",
+          "description": "Agent does not modify any files when the user chooses stop+document",
+          "type": "behavioral",
+          "check": "no Write/Edit/Bash tool calls after user selects stop"
+        },
+        {
+          "id": "plan-document-is-complete",
+          "description": "Documented plan covers intent, requirements, technical approach, and open questions",
+          "type": "qualitative",
+          "check": "output text includes sections for what the feature does, how it works technically, and any remaining uncertainties"
+        },
+        {
+          "id": "plan-is-actionable",
+          "description": "Plan is specific enough for a developer to act on — not vague bullet points",
+          "type": "qualitative",
+          "check": "plan mentions specific areas of the codebase that need changes (auth middleware, token handling, cookie configuration)"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "language-adaptation",
+      "category": "ux",
+      "prompt": "Je veux ajouter un système de commentaires sur les articles de blog de notre application.",
+      "expected_behavior": "The agent conducts the entire session in French — questions, options, plan, and confirmations. It uses the question tool in French, with French option labels and descriptions.",
+      "assertions": [
+        {
+          "id": "communicates-in-user-language",
+          "description": "All question tool calls use the same language as the user (French in this case)",
+          "type": "qualitative",
+          "check": "question labels, descriptions, and any text output are in French"
+        },
+        {
+          "id": "still-uses-question-tool",
+          "description": "Language adaptation does not prevent proper use of the question tool",
+          "type": "behavioral",
+          "check": "question tool is called at least once"
+        }
+      ]
+    }
+  ]
+}
