@@ -282,10 +282,10 @@ def _check_behavioral(assertion_id: str, check: str, tool_calls: list[dict]) -> 
             return False, f"Write/Edit/Bash called before first question at positions: {early_writes}"
         return True, "No writes before questioning phase"
 
-    elif assertion_id in ("confirmation-uses-question-tool", "review-uses-question-tool"):
+    elif assertion_id == "confirmation-uses-question-tool":
         question_calls = [tc for tc in tool_calls if tc["name"] == "question"]
         if len(question_calls) < 2:
-            return False, f"Only {len(question_calls)} question call(s) found; expected at least 2 (clarification + confirmation/review)"
+            return False, f"Only {len(question_calls)} question call(s) found; expected at least 2 (clarification + confirmation)"
         # Check that a question call has >= 3 options
         for qc in question_calls:
             questions = qc.get("input", {}).get("questions", [])
@@ -293,6 +293,19 @@ def _check_behavioral(assertion_id: str, check: str, tool_calls: list[dict]) -> 
                 if len(q.get("options", [])) >= 3:
                     return True, f"Confirmation question has {len(q.get('options', []))} options"
         return False, "No question call found with 3+ options for confirmation"
+
+    elif assertion_id == "review-uses-question-tool":
+        # In the review flow the clarification phase is already done (injected via setup),
+        # so only 1 question call is required — the one soliciting feedback on the plan.
+        question_calls = [tc for tc in tool_calls if tc["name"] == "question"]
+        if not question_calls:
+            return False, "question tool was never called during review"
+        for qc in question_calls:
+            questions = qc.get("input", {}).get("questions", [])
+            for q in questions:
+                if len(q.get("options", [])) >= 2:
+                    return True, f"Review question has {len(q.get('options', []))} options"
+        return False, "No question call found with 2+ options for review feedback"
 
     elif assertion_id == "offers-all-four-paths":
         question_calls = [tc for tc in tool_calls if tc["name"] == "question"]
@@ -332,26 +345,28 @@ def _check_behavioral(assertion_id: str, check: str, tool_calls: list[dict]) -> 
 
     elif assertion_id in ("review-offers-implement-path",):
         review_question_calls = [tc for tc in tool_calls if tc["name"] == "question"]
-        # Skip first question call (clarification), check subsequent ones
-        for qc in review_question_calls[1:]:
+        # The clarification phase is already done via setup context, so all question calls
+        # in this eval belong to the review phase — check every one of them.
+        for qc in review_question_calls:
             questions = qc.get("input", {}).get("questions", [])
             for q in questions:
                 labels = " ".join(o.get("label", "").lower() for o in q.get("options", []))
                 if any(kw in labels for kw in ["implement", "build", "go ahead", "proceed"]):
-                    return True, f"Implement option found in review question options"
+                    return True, "Implement option found in review question options"
         return False, "No 'implement' option found in review-phase question calls"
 
     elif assertion_id == "no-implementation-during-review":
-        # Between second and last question call, no writes
+        # The clarification phase is already done via setup context.
+        # Check that no Write/Edit occurs before the last question call (i.e. before the user
+        # explicitly confirms implementation from the review screen).
         question_indices = [i for i, n in enumerate(tool_names) if n == "question"]
         write_indices = [i for i, n in enumerate(tool_names) if n in write_edit_bash]
-        if len(question_indices) < 2:
-            return False, "Not enough question calls to validate review phase"
-        review_start = sorted(question_indices)[1]
+        if not question_indices:
+            return False, "No question calls found — cannot validate review phase"
         review_end = sorted(question_indices)[-1]
-        writes_during_review = [i for i in write_indices if review_start < i < review_end]
-        if writes_during_review:
-            return False, f"Write/Edit calls during review phase at positions: {writes_during_review}"
+        writes_before_last_question = [i for i in write_indices if i < review_end]
+        if writes_before_last_question:
+            return False, f"Write/Edit calls during review phase at positions: {writes_before_last_question}"
         return True, "No writes during review phase"
 
     elif assertion_id == "no-redundant-questions":
@@ -565,8 +580,11 @@ SIMULATED_USER_RESPONSES: dict[str, list[str]] = {
         "Looks good, go ahead.",
     ],
     "technical-review-flow": [
-        "Let me see the technical plan first.",
-        "The plan looks good. Implement it.",
+        # First response: consumed by the confirmation question (if the model asks one despite
+        # the setup context) OR by the review question itself. Either way, it requests review.
+        "I'd like to review the technical plan first before we implement.",
+        # Second response: consumed by the review feedback question — user approves and proceeds.
+        "The plan looks good. Go ahead and implement it.",
     ],
     "implement-path": [
         "Go ahead and implement it.",
@@ -635,6 +653,15 @@ def run_agent(
             for tc in msg.tool_calls:
                 try:
                     input_data = json.loads(tc.function.arguments)
+                    # Some models double-encode the arguments (JSON string inside JSON string).
+                    # If parsing yields a string instead of a dict, try a second parse.
+                    if isinstance(input_data, str):
+                        try:
+                            input_data = json.loads(input_data)
+                        except (json.JSONDecodeError, TypeError):
+                            input_data = {}
+                    if not isinstance(input_data, dict):
+                        input_data = {}
                 except json.JSONDecodeError:
                     input_data = {}
                 tool_entry = {
