@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#   "anthropic>=0.40.0",
+#   "openai>=1.50.0",
 #   "rich>=13.0.0",
 # ]
 # ///
@@ -13,23 +13,34 @@ Runs the evals defined in evals/evals.json against the ask-me skill.
 Each eval simulates a user prompt and validates the agent's behavior
 against the defined assertions.
 
+Supported providers (all use the OpenAI-compatible API):
+  - Anthropic direct:  ANTHROPIC_API_KEY  (base URL: https://api.anthropic.com/v1)
+  - OpenRouter:        OPENROUTER_API_KEY (base URL: https://openrouter.ai/api/v1)
+  - ZenCode:           ZENCODE_API_KEY    (base URL: https://api.zencode.dev/v1)
+  - Any OpenAI-compatible provider: set LLM_API_KEY + LLM_BASE_URL + LLM_MODEL
+
+The runner auto-detects which key is set. You can also override via --provider.
+
 Usage:
   uv run scripts/run_evals.py
   uv run scripts/run_evals.py --eval 0
   uv run scripts/run_evals.py --eval basic-feature-request-questioning
   uv run scripts/run_evals.py --category questioning
+  uv run scripts/run_evals.py --provider openrouter
+  uv run scripts/run_evals.py --model anthropic/claude-opus-4-5
   uv run scripts/run_evals.py --verbose
 """
 
 import argparse
 import json
+import os
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import anthropic
+from openai import OpenAI
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -43,6 +54,97 @@ SKILL_PATH = REPO_ROOT / "SKILL.md"
 EVALS_PATH = REPO_ROOT / "evals" / "evals.json"
 
 console = Console()
+
+# ---------------------------------------------------------------------------
+# Provider configuration
+# ---------------------------------------------------------------------------
+
+PROVIDERS: dict[str, dict] = {
+    "anthropic": {
+        "env_key": "ANTHROPIC_API_KEY",
+        "base_url": "https://api.anthropic.com/v1",
+        "default_model": "claude-opus-4-5",
+    },
+    "openrouter": {
+        "env_key": "OPENROUTER_API_KEY",
+        "base_url": "https://openrouter.ai/api/v1",
+        "default_model": "anthropic/claude-opus-4-5",
+    },
+    "zencode": {
+        "env_key": "ZENCODE_API_KEY",
+        "base_url": "https://api.zencode.dev/v1",
+        "default_model": "anthropic/claude-opus-4-5",
+    },
+    "custom": {
+        "env_key": "LLM_API_KEY",
+        "base_url": None,  # must be set via LLM_BASE_URL
+        "default_model": None,  # must be set via LLM_MODEL
+    },
+}
+
+
+def detect_provider() -> str:
+    """Auto-detect which provider to use based on environment variables."""
+    for name, config in PROVIDERS.items():
+        if name == "custom":
+            continue
+        if os.environ.get(config["env_key"]):
+            return name
+    # Fallback to custom if LLM_API_KEY is set
+    if os.environ.get("LLM_API_KEY"):
+        return "custom"
+    return "anthropic"  # will fail with a clear error if key is missing
+
+
+def build_client(provider: str, model_override: str | None = None) -> tuple[OpenAI, str]:
+    """
+    Build an OpenAI-compatible client for the given provider.
+    Returns (client, model_name).
+    """
+    config = PROVIDERS.get(provider)
+    if config is None:
+        console.print(f"[red]Unknown provider: {provider}[/red]")
+        console.print(f"Available providers: {', '.join(PROVIDERS.keys())}")
+        sys.exit(1)
+
+    if provider == "custom":
+        api_key = os.environ.get("LLM_API_KEY")
+        base_url = os.environ.get("LLM_BASE_URL")
+        default_model = os.environ.get("LLM_MODEL")
+        if not api_key:
+            console.print("[red]LLM_API_KEY is not set for custom provider[/red]")
+            sys.exit(1)
+        if not base_url:
+            console.print("[red]LLM_BASE_URL is not set for custom provider[/red]")
+            sys.exit(1)
+    else:
+        api_key = os.environ.get(config["env_key"])
+        base_url = config["base_url"]
+        default_model = config["default_model"]
+        if not api_key:
+            console.print(f"[red]{config['env_key']} is not set[/red]")
+            console.print(
+                f"[dim]Set it with: export {config['env_key']}=your-key-here[/dim]"
+            )
+            sys.exit(1)
+
+    model = model_override or default_model
+    if not model:
+        console.print("[red]No model specified. Use --model or set LLM_MODEL[/red]")
+        sys.exit(1)
+
+    # OpenRouter requires an extra header for rankings/analytics
+    extra_headers = {}
+    if provider == "openrouter":
+        extra_headers["HTTP-Referer"] = "https://github.com/cedricbou/ask-me"
+        extra_headers["X-Title"] = "ask-me skill evals"
+
+    client = OpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        default_headers=extra_headers if extra_headers else None,
+    )
+    return client, model
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -480,13 +582,19 @@ SIMULATED_USER_RESPONSES: dict[str, list[str]] = {
 MAX_AGENTIC_ROUNDS = 5  # prevent infinite loops in simulation
 
 
-def run_agent(eval_data: dict, skill_content: str, verbose: bool = False) -> tuple[list[dict], str]:
+def run_agent(
+    eval_data: dict,
+    skill_content: str,
+    client: OpenAI,
+    model: str,
+    verbose: bool = False,
+) -> tuple[list[dict], str]:
     """
     Run the agent on the eval prompt and collect tool calls + output.
     Returns (tool_calls, full_text_output).
-    """
-    client = anthropic.Anthropic()
 
+    Uses the OpenAI-compatible API (works with Anthropic, OpenRouter, ZenCode, etc.)
+    """
     setup = eval_data.get("setup", "")
     system = build_system_prompt(skill_content, setup)
 
@@ -496,80 +604,92 @@ def run_agent(eval_data: dict, skill_content: str, verbose: bool = False) -> tup
 
     simulated_responses = list(SIMULATED_USER_RESPONSES.get(eval_data["name"], []))
 
+    # Convert tool schemas to OpenAI format
+    openai_tools = [
+        {"type": "function", "function": t}
+        for t in ALL_TOOLS
+    ]
+
     for round_num in range(MAX_AGENTIC_ROUNDS):
         if verbose:
             console.print(f"  [dim]Round {round_num + 1}...[/dim]")
 
-        response = client.messages.create(
-            model="claude-opus-4-5",
+        response = client.chat.completions.create(
+            model=model,
             max_tokens=4096,
-            system=system,
-            messages=messages,
-            tools=ALL_TOOLS,
+            messages=[{"role": "system", "content": system}] + messages,
+            tools=openai_tools,
+            tool_choice="auto",
         )
 
+        choice = response.choices[0]
+        msg = choice.message
+
         # Collect text output
-        for block in response.content:
-            if hasattr(block, "text"):
-                full_text += block.text + "\n"
+        if msg.content:
+            full_text += msg.content + "\n"
 
         # Collect tool calls from this round
         tool_uses = []
-        for block in response.content:
-            if hasattr(block, "type") and block.type == "tool_use":
-                tc = {"name": block.name, "input": block.input, "id": block.id}
-                all_tool_calls.append(tc)
-                tool_uses.append(tc)
+        if msg.tool_calls:
+            for tc in msg.tool_calls:
+                try:
+                    input_data = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    input_data = {}
+                tool_entry = {
+                    "name": tc.function.name,
+                    "input": input_data,
+                    "id": tc.id,
+                }
+                all_tool_calls.append(tool_entry)
+                tool_uses.append(tool_entry)
                 if verbose:
-                    console.print(f"  [cyan]  → {block.name}[/cyan]")
+                    console.print(f"  [cyan]  → {tc.function.name}[/cyan]")
 
-        # If no tool calls and stop_reason is end_turn, we're done
-        if not tool_uses and response.stop_reason == "end_turn":
+        # If no tool calls and stop_reason is end, we're done
+        if not tool_uses and choice.finish_reason in ("stop", "end_turn"):
             break
 
-        # If no tool calls but still running, break
         if not tool_uses:
             break
 
-        # Build assistant message
-        assistant_content = []
-        for block in response.content:
-            if hasattr(block, "type") and block.type == "text":
-                assistant_content.append({"type": "text", "text": block.text})
-            elif hasattr(block, "type") and block.type == "tool_use":
-                assistant_content.append({
-                    "type": "tool_use",
-                    "id": block.id,
-                    "name": block.name,
-                    "input": block.input,
-                })
+        # Add assistant message (with tool_calls if present)
+        assistant_msg: dict = {"role": "assistant"}
+        if msg.content:
+            assistant_msg["content"] = msg.content
+        else:
+            assistant_msg["content"] = None
+        if msg.tool_calls:
+            assistant_msg["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
+                }
+                for tc in msg.tool_calls
+            ]
+        messages.append(assistant_msg)
 
-        messages.append({"role": "assistant", "content": assistant_content})
-
-        # Build tool results (simulate user responding to question, or empty for others)
-        tool_results = []
-        for tc in tool_uses:
-            if tc["name"] == "question":
-                # Provide simulated user response
+        # Build tool results
+        for tc_entry in tool_uses:
+            if tc_entry["name"] == "question":
                 if simulated_responses:
                     user_answer = simulated_responses.pop(0)
                 else:
                     user_answer = "Proceed as you think best."
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tc["id"],
-                    "content": user_answer,
-                })
-                # Also add as a user message to keep context
+                result_content = user_answer
             else:
-                # For file operations: return success
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tc["id"],
-                    "content": f"[{tc['name']} executed successfully]",
-                })
+                result_content = f"[{tc_entry['name']} executed successfully]"
 
-        messages.append({"role": "user", "content": tool_results})
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc_entry["id"],
+                "content": result_content,
+            })
 
     return all_tool_calls, full_text
 
@@ -675,6 +795,27 @@ def parse_args() -> argparse.Namespace:
         help="Write results to a JSON file",
         default=None,
     )
+    parser.add_argument(
+        "--provider",
+        "-p",
+        choices=list(PROVIDERS.keys()),
+        default=None,
+        help=(
+            "LLM provider to use. Auto-detected from env vars if not specified. "
+            "anthropic=ANTHROPIC_API_KEY, openrouter=OPENROUTER_API_KEY, "
+            "zencode=ZENCODE_API_KEY, custom=LLM_API_KEY+LLM_BASE_URL+LLM_MODEL"
+        ),
+    )
+    parser.add_argument(
+        "--model",
+        "-m",
+        default=None,
+        help=(
+            "Model to use. Overrides provider default. "
+            "Examples: claude-opus-4-5, anthropic/claude-opus-4-5, "
+            "openai/gpt-4o"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -696,12 +837,20 @@ def load_evals(filter_id: str | None = None, filter_category: str | None = None)
     return evals
 
 
-def run_eval(eval_data: dict, skill_content: str, verbose: bool = False) -> EvalResult:
+def run_eval(
+    eval_data: dict,
+    skill_content: str,
+    client: OpenAI,
+    model: str,
+    verbose: bool = False,
+) -> EvalResult:
     """Run a single eval and return the result."""
     start = time.time()
 
     try:
-        tool_calls, agent_output = run_agent(eval_data, skill_content, verbose=verbose)
+        tool_calls, agent_output = run_agent(
+            eval_data, skill_content, client=client, model=model, verbose=verbose
+        )
 
         assertion_results = [
             check_assertion(a, tool_calls, agent_output)
@@ -759,11 +908,16 @@ def main() -> None:
             console.print(f"  ✓ [{e['id']}] {e['name']} ({len(e.get('assertions', []))} assertions)")
         sys.exit(0)
 
+    # Build LLM client
+    provider = args.provider or detect_provider()
+    client, model = build_client(provider, model_override=args.model)
+    console.print(f"[dim]Provider: {provider} / Model: {model}[/dim]\n")
+
     results: list[EvalResult] = []
 
     for eval_data in evals:
         console.print(f"[bold]Running[/bold] [{eval_data['id']}] {eval_data['name']}...")
-        result = run_eval(eval_data, skill_content, verbose=args.verbose)
+        result = run_eval(eval_data, skill_content, client=client, model=model, verbose=args.verbose)
         results.append(result)
         render_eval_result(result)
         console.print()

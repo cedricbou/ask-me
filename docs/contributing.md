@@ -30,6 +30,25 @@ uv run scripts/run_evals.py --dry-run
 
 Expected output: a list of 6 eval names, then "6 evals would run."
 
+To run evals against the API, set one of the supported provider keys:
+
+```bash
+# OpenRouter
+export OPENROUTER_API_KEY=sk-or-...
+
+# Anthropic direct
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# ZenCode
+export ZENCODE_API_KEY=...
+
+# Custom OpenAI-compatible provider
+export LLM_API_KEY=... LLM_BASE_URL=https://your.provider/v1 LLM_MODEL=model-name
+uv run scripts/run_evals.py --provider custom
+```
+
+The runner auto-detects which key is set. See [docs/evals-guide.md](evals-guide.md) for details.
+
 ---
 
 ## Contribution types

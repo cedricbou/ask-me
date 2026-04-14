@@ -17,17 +17,33 @@ assertion checks, supplemented by qualitative text scans.
 
 ## Running evals
 
-You need [uv](https://docs.astral.sh/uv/) and an `ANTHROPIC_API_KEY`:
+The runner auto-detects your provider from environment variables (first match wins):
+
+| Provider | Env var | Notes |
+|---|---|---|
+| Anthropic direct | `ANTHROPIC_API_KEY` | Direct API |
+| OpenRouter | `OPENROUTER_API_KEY` | Access any model via OpenRouter |
+| ZenCode | `ZENCODE_API_KEY` | ZenCode API |
+| Custom | `LLM_API_KEY` + `LLM_BASE_URL` + `LLM_MODEL` | Any OpenAI-compatible endpoint |
 
 ```bash
-export ANTHROPIC_API_KEY=sk-...
-
-# All evals
+# OpenRouter
+export OPENROUTER_API_KEY=sk-or-...
 uv run scripts/run_evals.py
 
-# One by ID or name
-uv run scripts/run_evals.py --eval 0
+# Anthropic direct
+export ANTHROPIC_API_KEY=sk-ant-...
+uv run scripts/run_evals.py
+
+# Force a specific provider
+uv run scripts/run_evals.py --provider openrouter
+
+# Override the model
+uv run scripts/run_evals.py --model anthropic/claude-opus-4-5
+
+# One eval by name or ID
 uv run scripts/run_evals.py --eval basic-feature-request-questioning
+uv run scripts/run_evals.py --eval 0
 
 # By category
 uv run scripts/run_evals.py --category questioning
@@ -48,6 +64,21 @@ uv run scripts/run_evals.py --output results.json
 ```
 
 Exit code: `0` if all evals pass, `1` if any fail.
+
+### GitHub Actions secret setup
+
+Add your API key as a repository secret:
+**Settings → Secrets and variables → Actions → New repository secret**
+
+| Secret name | For provider |
+|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic direct |
+| `OPENROUTER_API_KEY` | OpenRouter |
+| `ZENCODE_API_KEY` | ZenCode |
+| `LLM_API_KEY` | Custom (also set `LLM_BASE_URL` and `LLM_MODEL` in the workflow) |
+
+The CI workflow auto-detects which secret is set and runs evals accordingly. If no secret
+is configured, it falls back to dry-run mode.
 
 ---
 

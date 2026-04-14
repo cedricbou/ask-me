@@ -106,27 +106,38 @@ ask-me/
 
 ## Running evals
 
-Requires [uv](https://docs.astral.sh/uv/) and an `ANTHROPIC_API_KEY` environment variable.
+Requires [uv](https://docs.astral.sh/uv/) and an API key for your preferred provider.
 
 ```bash
-# Run all evals
+# Anthropic (direct)
+export ANTHROPIC_API_KEY=sk-ant-...
 uv run scripts/run_evals.py
 
-# Run a specific eval by ID or name
-uv run scripts/run_evals.py --eval 0
-uv run scripts/run_evals.py --eval basic-feature-request-questioning
+# OpenRouter
+export OPENROUTER_API_KEY=sk-or-...
+uv run scripts/run_evals.py
 
-# Run a category
-uv run scripts/run_evals.py --category questioning
+# ZenCode
+export ZENCODE_API_KEY=...
+uv run scripts/run_evals.py
 
-# Dry run — validate structure without API calls
+# Custom OpenAI-compatible provider
+export LLM_API_KEY=... LLM_BASE_URL=https://your-provider.com/v1 LLM_MODEL=your-model
+uv run scripts/run_evals.py --provider custom
+
+# Dry run — validate structure without any API call
 uv run scripts/run_evals.py --dry-run
+```
 
-# Save results to a JSON file
-uv run scripts/run_evals.py --output results.json
+Other useful flags:
 
-# Verbose mode — show agent interaction rounds
-uv run scripts/run_evals.py --verbose
+```bash
+uv run scripts/run_evals.py --eval basic-feature-request-questioning  # one eval by name
+uv run scripts/run_evals.py --eval 0                                   # one eval by ID
+uv run scripts/run_evals.py --category questioning                     # by category
+uv run scripts/run_evals.py --model anthropic/claude-opus-4-5          # override model
+uv run scripts/run_evals.py --verbose                                  # show agent rounds
+uv run scripts/run_evals.py --output results.json                      # save results
 ```
 
 See [docs/evals-guide.md](docs/evals-guide.md) for a full explanation of the eval system.

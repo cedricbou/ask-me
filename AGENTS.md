@@ -104,13 +104,20 @@ If you believe one of these should change, open an issue first.
 ## Running evals
 
 ```bash
-export ANTHROPIC_API_KEY=sk-...
+# Auto-detects provider from env var (first match wins):
+#   ANTHROPIC_API_KEY  → anthropic
+#   OPENROUTER_API_KEY → openrouter
+#   ZENCODE_API_KEY    → zencode
+#   LLM_API_KEY        → custom (also set LLM_BASE_URL + LLM_MODEL)
 
-# All evals
+export OPENROUTER_API_KEY=sk-or-...
 uv run scripts/run_evals.py
 
-# One eval
-uv run scripts/run_evals.py --eval basic-feature-request-questioning
+# Force a provider
+uv run scripts/run_evals.py --provider openrouter
+
+# Override model
+uv run scripts/run_evals.py --model anthropic/claude-opus-4-5
 
 # Dry run (no API)
 uv run scripts/run_evals.py --dry-run
