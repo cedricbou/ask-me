@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -40,49 +39,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx semantic-release
-
-  evals:
-    name: Run Evals
-    runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      contains(github.event.head_commit.modified, 'SKILL.md') ||
-      contains(github.event.head_commit.modified, 'evals/evals.json') ||
-      contains(github.event.head_commit.modified, 'scripts/run_evals.py')
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Run evals (dry-run if no API key)
-        env:
-          # Set one of these secrets in your GitHub repo settings:
-          # Settings → Secrets and variables → Actions → New repository secret
-          #
-          # Option 1 — Anthropic direct:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Option 2 — OpenRouter:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          # Option 3 — ZenCode:
-          ZENCODE_API_KEY: ${{ secrets.ZENCODE_API_KEY }}
-          # Option 4 — Custom OpenAI-compatible provider:
-          # LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          # LLM_BASE_URL: https://your-provider.com/v1
-          # LLM_MODEL: your-model-name
-        run: |
-          if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ] && [ -z "$ZENCODE_API_KEY" ] && [ -z "$LLM_API_KEY" ]; then
-            echo "No API key found — running in dry-run mode"
-            uv run scripts/run_evals.py --dry-run
-          else
-            uv run scripts/run_evals.py --output eval-results.json
-          fi
-
-      - name: Upload eval results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: eval-results
-          path: eval-results.json
-          if-no-files-found: ignore
