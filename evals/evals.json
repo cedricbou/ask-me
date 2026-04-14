@@ -8,6 +8,8 @@
       "name": "basic-feature-request-questioning",
       "category": "questioning",
       "prompt": "I want to add a 'request a quote' button to the homepage of our React app.",
+      "user_persona": "Frontend developer working on a React SPA. Familiar with React components, React Router, and basic form handling. The app already has a homepage with a hero section.",
+      "user_goal": "Answer the agent's clarifying questions with concrete details: the button goes in the hero section, clicking it opens a modal with a contact form (name, email, project description), no backend for now — just mailto.",
       "expected_behavior": "The agent launches a questioning session using the question tool. It asks relevant clarifying questions about the feature (where exactly on the homepage, what happens when clicked, form fields needed, backend integration, etc.). It does NOT start implementing immediately. It offers concrete options in the question tool while allowing free-text answers.",
       "assertions": [
         {
@@ -45,13 +47,30 @@
       "conversation_history": [
         {
           "role": "assistant",
-          "content": "I'd like to understand a few things before diving in. [question tool: asked about theme control, toggle location, persistence]"
+          "content": "Before I start implementing, I need to understand a few things about the dark mode feature. Let me ask some clarifying questions."
         },
         {
-          "role": "user",
-          "content": "Use system preference by default, toggle in header, persist in localStorage."
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_setup_q1",
+              "type": "function",
+              "function": {
+                "name": "question",
+                "arguments": "{\"questions\":[{\"question\":\"How should the dark mode toggle work?\",\"header\":\"Theme Control\",\"options\":[{\"label\":\"Follow system preference\",\"description\":\"Use the OS-level dark mode setting by default\"},{\"label\":\"Manual toggle only\",\"description\":\"User must explicitly toggle dark mode\"},{\"label\":\"System preference with manual override\",\"description\":\"Start with system preference but allow user to override\"}]},{\"question\":\"Where should the toggle be placed?\",\"header\":\"Toggle Location\",\"options\":[{\"label\":\"Header/navbar\",\"description\":\"Place toggle in the top navigation bar\"},{\"label\":\"Settings page\",\"description\":\"Place toggle in a settings page\"},{\"label\":\"Footer\",\"description\":\"Place toggle in the footer\"}]},{\"question\":\"How should the preference be persisted?\",\"header\":\"Persistence\",\"options\":[{\"label\":\"localStorage\",\"description\":\"Save in browser localStorage\"},{\"label\":\"Cookie\",\"description\":\"Save as a cookie for SSR access\"},{\"label\":\"No persistence\",\"description\":\"Reset to system preference on each visit\"}]}]}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_setup_q1",
+          "content": "Use system preference by default with manual override. Toggle in the header. Persist in localStorage."
         }
       ],
+      "user_persona": "Fullstack developer building a Next.js app with Tailwind CSS. Comfortable with React hooks and CSS-in-JS but wants guidance on the dark mode implementation approach.",
+      "user_goal": "Answer the agent's first 2-3 rounds of questions briefly. After round 3, instead of answering more questions, say: 'I think you have enough context. Can you summarize what you've gathered and show me the next steps — should I implement, review the plan, keep clarifying, or just document it?' This should trigger the confirmation step. When the confirmation is presented, pick 'implement'.",
       "expected_behavior": "After gathering sufficient context, the agent uses the question tool to present the confirmation step — offering the user a choice between: implement now, review the technical plan, keep clarifying, or stop and document the plan. The agent does NOT proceed to implementation without this confirmation.",
       "assertions": [
         {
@@ -95,9 +114,11 @@
         },
         {
           "role": "user",
-          "content": "I'd like to review the technical plan first before we implement. Please present the plan, then use the question tool to ask for my feedback and offer me the option to proceed to implementation."
+          "content": "I'd like to review the technical plan first before we implement."
         }
       ],
+      "user_persona": "Backend-leaning fullstack developer. Uses Node/Express daily, familiar with Socket.io. Wants to validate the architecture before implementation starts.",
+      "user_goal": "Review the technical plan the agent presents. When asked for feedback, say the plan looks good and ask to proceed to implementation.",
       "expected_behavior": "The agent presents a clear technical plan (files to change, core logic, design decisions). Then uses the question tool to get feedback — offering specific angles to explore OR free text. The user is always given the option to continue reviewing or proceed to implementation. The agent does not implement until the user explicitly chooses to.",
       "assertions": [
         {
@@ -150,6 +171,8 @@
           "content": "Go ahead and implement it. Use the Write or Edit tools to make the actual changes to the files."
         }
       ],
+      "user_persona": "Frontend developer using React with React Query. The codebase already has a Spinner component at src/components/Spinner.tsx.",
+      "user_goal": "The agent should implement now without asking more questions. If it asks anything, tell it to just proceed with the implementation using Write/Edit tools.",
       "expected_behavior": "The agent proceeds to implementation without asking redundant questions already answered. It uses the information gathered to implement efficiently. It does not restart the questioning loop after the user has confirmed implementation.",
       "assertions": [
         {
@@ -196,6 +219,8 @@
           "content": "Stop here and just write down the plan."
         }
       ],
+      "user_persona": "Tech lead planning a security migration. Uses Express/Passport.js with React frontend. Wants a written plan to share with the team before any code is touched.",
+      "user_goal": "The agent should document the plan without implementing anything. If it asks questions, redirect it to just write the plan.",
       "expected_behavior": "The agent writes a clear plan document inline — covering feature intent, surfaced functional requirements, proposed technical approach, and open questions. It does not attempt to implement. The document should be usable as a spec by a developer.",
       "assertions": [
         {
@@ -223,6 +248,8 @@
       "name": "language-adaptation",
       "category": "ux",
       "prompt": "Je veux ajouter un système de commentaires sur les articles de blog de notre application.",
+      "user_persona": "Développeur francophone travaillant sur une application web avec des articles de blog. Préfère communiquer en français.",
+      "user_goal": "Répondre en français aux questions de l'agent. Les commentaires doivent apparaître sous chaque article, les utilisateurs doivent être connectés pour commenter, pas de modération pour l'instant.",
       "expected_behavior": "The agent conducts the entire session in French — questions, options, plan, and confirmations. It uses the question tool in French, with French option labels and descriptions.",
       "assertions": [
         {

@@ -253,7 +253,7 @@ def check_assertion(assertion: dict, tool_calls: list[dict], agent_output: str) 
     if a_type == "behavioral":
         passed, evidence = _check_behavioral(a_id, check, tool_calls)
     elif a_type == "qualitative":
-        passed, evidence = _check_qualitative(a_id, check, agent_output)
+        passed, evidence = _check_qualitative(a_id, check, agent_output, tool_calls)
     else:
         passed, evidence = False, f"Unknown assertion type: {a_type}"
 
@@ -323,22 +323,26 @@ def _check_behavioral(assertion_id: str, check: str, tool_calls: list[dict]) -> 
             questions = qc.get("input", {}).get("questions", [])
             for q in questions:
                 options = q.get("options", [])
-                labels = " ".join(o.get("label", "").lower() for o in options)
-                # Look for the four paths
+                # Combine both labels and descriptions for keyword matching
+                texts = " ".join(
+                    (o.get("label", "") + " " + o.get("description", "")).lower()
+                    for o in options
+                )
+                # Look for the four paths with broad keyword matching
                 has_implement = any(
-                    kw in labels for kw in ["implement", "build", "go ahead", "proceed"]
+                    kw in texts for kw in ["implement", "build", "go ahead", "proceed", "start cod", "code it", "begin"]
                 )
                 has_review = any(
-                    kw in labels for kw in ["review", "plan", "technical"]
+                    kw in texts for kw in ["review", "plan", "technical", "architecture", "design", "overview"]
                 )
                 has_clarify = any(
-                    kw in labels for kw in ["clarif", "more question", "keep", "iterate"]
+                    kw in texts for kw in ["clarif", "more question", "keep", "iterate", "ask more", "additional", "refine"]
                 )
                 has_stop = any(
-                    kw in labels for kw in ["stop", "document", "plan only", "write it"]
+                    kw in texts for kw in ["stop", "document", "plan only", "write it", "save", "export", "just the plan", "don't implement", "no code"]
                 )
                 if has_implement and has_review and has_clarify and has_stop:
-                    return True, f"All four paths found in options: {labels}"
+                    return True, f"All four paths found in options: {texts[:200]}"
         return False, "Could not find a question offering all four paths (implement/review/clarify/stop)"
 
     elif assertion_id == "no-implementation-before-confirmation":
@@ -361,8 +365,11 @@ def _check_behavioral(assertion_id: str, check: str, tool_calls: list[dict]) -> 
         for qc in review_question_calls:
             questions = qc.get("input", {}).get("questions", [])
             for q in questions:
-                labels = " ".join(o.get("label", "").lower() for o in q.get("options", []))
-                if any(kw in labels for kw in ["implement", "build", "go ahead", "proceed"]):
+                texts = " ".join(
+                    (o.get("label", "") + " " + o.get("description", "")).lower()
+                    for o in q.get("options", [])
+                )
+                if any(kw in texts for kw in ["implement", "build", "go ahead", "proceed", "start cod", "code it", "begin"]):
                     return True, "Implement option found in review question options"
         return False, "No 'implement' option found in review-phase question calls"
 
@@ -415,15 +422,40 @@ def _check_behavioral(assertion_id: str, check: str, tool_calls: list[dict]) -> 
         return False, f"Unknown behavioral assertion_id: {assertion_id}"
 
 
-def _check_qualitative(assertion_id: str, check: str, agent_output: str) -> tuple[bool, str]:
-    """Check qualitative assertions by scanning the agent's text output."""
-    output_lower = agent_output.lower()
+def _build_combined_text(agent_output: str, tool_calls: list[dict] | None = None) -> str:
+    """Build a combined text from agent free-text output + all tool call inputs.
+
+    Many models (especially smaller ones) put all their content inside tool call
+    arguments rather than in free text.  The qualitative checkers need to scan both
+    sources to work reliably across models.
+    """
+    parts = [agent_output]
+    if tool_calls:
+        for tc in tool_calls:
+            inp = tc.get("input", {})
+            if tc["name"] == "question":
+                for q in inp.get("questions", []):
+                    parts.append(q.get("question", ""))
+                    parts.append(q.get("header", ""))
+                    for o in q.get("options", []):
+                        parts.append(o.get("label", ""))
+                        parts.append(o.get("description", ""))
+            elif tc["name"] in ("Write", "Edit"):
+                parts.append(inp.get("content", ""))
+                parts.append(inp.get("newString", ""))
+    return " ".join(parts)
+
+
+def _check_qualitative(assertion_id: str, check: str, agent_output: str, tool_calls: list[dict] | None = None) -> tuple[bool, str]:
+    """Check qualitative assertions by scanning the agent's text output and tool call inputs."""
+    combined = _build_combined_text(agent_output, tool_calls)
+    combined_lower = combined.lower()
 
     if assertion_id == "questions-are-relevant":
         functional_keywords = ["click", "form", "field", "rout", "navig", "submit", "modal", "page", "open", "redirect"]
         technical_keywords = ["component", "backend", "api", "integrat", "existing", "codebase", "stack", "endpoint"]
-        has_functional = any(kw in output_lower for kw in functional_keywords)
-        has_technical = any(kw in output_lower for kw in technical_keywords)
+        has_functional = any(kw in combined_lower for kw in functional_keywords)
+        has_technical = any(kw in combined_lower for kw in technical_keywords)
         if has_functional and has_technical:
             return True, "Found both functional and technical question themes"
         missing = []
@@ -434,31 +466,29 @@ def _check_qualitative(assertion_id: str, check: str, agent_output: str) -> tupl
         return False, f"Missing question themes: {missing}"
 
     elif assertion_id == "options-are-concrete":
-        # Hard to check programmatically — look for specificity signals
-        vague_patterns = ["yes", "no", "maybe", "other"]
         concrete_count = sum(
             1 for pattern in ["button", "form", "modal", "route", "component", "page", "api", "link"]
-            if pattern in output_lower
+            if pattern in combined_lower
         )
         return concrete_count >= 1, f"Found {concrete_count} concrete domain term(s) in options"
 
     elif assertion_id == "plan-is-structured":
-        structure_keywords = ["file", "component", "function", "approach", "decision", "trade-off", "uncertain", "open question"]
-        found = [kw for kw in structure_keywords if kw in output_lower]
+        structure_keywords = ["file", "component", "function", "approach", "decision", "trade-off", "uncertain", "open question", "endpoint", "service", "handler", "module", "event", "socket", "listener", "middleware"]
+        found = [kw for kw in structure_keywords if kw in combined_lower]
         if len(found) >= 3:
             return True, f"Plan references: {found}"
         return False, f"Plan seems incomplete; found only: {found}"
 
     elif assertion_id == "plan-document-is-complete":
         required_themes = [
-            (["intent", "goal", "purpose", "want to", "feature"], "intent/goal"),
-            (["approach", "implement", "technical", "how"], "technical approach"),
-            (["open question", "uncertain", "unclear", "tbd", "need to know"], "open questions"),
+            (["intent", "goal", "purpose", "want to", "feature", "objective", "migrat", "overview"], "intent/goal"),
+            (["approach", "implement", "technical", "how", "step", "phase", "change", "modif"], "technical approach"),
+            (["open question", "uncertain", "unclear", "tbd", "need to know", "consider", "risk", "caveat", "note", "assumption", "decision"], "open questions"),
         ]
         missing = []
         found = []
         for keywords, label in required_themes:
-            if any(kw in output_lower for kw in keywords):
+            if any(kw in combined_lower for kw in keywords):
                 found.append(label)
             else:
                 missing.append(label)
@@ -468,22 +498,21 @@ def _check_qualitative(assertion_id: str, check: str, agent_output: str) -> tupl
 
     elif assertion_id == "plan-is-actionable":
         auth_keywords = ["middleware", "cookie", "token", "auth", "session", "header", "httponly", "secure"]
-        found = [kw for kw in auth_keywords if kw in output_lower]
+        found = [kw for kw in auth_keywords if kw in combined_lower]
         if len(found) >= 2:
             return True, f"Plan references auth-specific areas: {found}"
         return False, f"Plan lacks auth-specific technical detail; found: {found}"
 
     elif assertion_id == "uses-gathered-context":
         context_keywords = ["react query", "isloading", "isfetching", "spinner"]
-        found = [kw for kw in context_keywords if kw in output_lower]
+        found = [kw for kw in context_keywords if kw in combined_lower]
         if len(found) >= 2:
             return True, f"Implementation references gathered context: {found}"
         return False, f"Implementation doesn't seem to use gathered context; found: {found}"
 
     elif assertion_id == "communicates-in-user-language":
-        # Check for French language markers
         french_markers = ["je ", "vous ", "votre ", "nous ", "comment ", "quel", "est-ce", "les ", "des "]
-        found = [m for m in french_markers if m in output_lower]
+        found = [m for m in french_markers if m in combined_lower]
         if len(found) >= 3:
             return True, f"French markers found: {found}"
         return False, f"Not enough French language markers; found: {found}"
@@ -587,36 +616,108 @@ READ_TOOL_SCHEMA = {
 
 ALL_TOOLS = [QUESTION_TOOL_SCHEMA, WRITE_TOOL_SCHEMA, EDIT_TOOL_SCHEMA, BASH_TOOL_SCHEMA, READ_TOOL_SCHEMA]
 
-# Simulated user responses for each eval
-SIMULATED_USER_RESPONSES: dict[str, list[str]] = {
-    "basic-feature-request-questioning": [
-        # After the agent asks questions, user answers and then agent should confirm
-        "On the homepage hero section. When clicked it opens a modal with a contact form (name, email, project description). No backend needed for now — just a mailto link.",
-    ],
-    "confirmation-step-offered": [
-        # User is presented with confirmation options — we simulate them picking nothing
-        # (the assertion just checks the question tool was used with options)
-        "Looks good, go ahead.",
-    ],
-    "technical-review-flow": [
-        # First response: consumed by the confirmation question (if the model asks one despite
-        # the setup context) OR by the review question itself. Either way, it requests review.
-        "I'd like to review the technical plan first before we implement.",
-        # Second response: consumed by the review feedback question — user approves and proceeds.
-        "The plan looks good. Go ahead and implement it.",
-    ],
-    "implement-path": [
-        "Go ahead and implement it.",
-    ],
-    "stop-and-document-path": [
-        "Stop here and just write down the plan.",
-    ],
-    "language-adaptation": [
-        "Les commentaires doivent apparaître sous chaque article. Les utilisateurs doivent être connectés pour commenter. Pas de modération pour l'instant.",
-    ],
-}
+MAX_AGENTIC_ROUNDS = 8  # prevent infinite loops in simulation
 
-MAX_AGENTIC_ROUNDS = 5  # prevent infinite loops in simulation
+
+def simulate_user_response(
+    question_input: dict,
+    eval_data: dict,
+    conversation_so_far: list[dict],
+    client: OpenAI,
+    model: str,
+    verbose: bool = False,
+) -> str:
+    """
+    Use an LLM to simulate a realistic user response to a question tool call.
+
+    Instead of static canned responses, this function sends the question (with its
+    options) to a lightweight LLM along with the user's persona and goal, and returns
+    a natural-sounding answer that picks from the offered options or provides free-text.
+    """
+    user_persona = eval_data.get("user_persona", "A software developer.")
+    user_goal = eval_data.get("user_goal", "Answer the agent's questions helpfully.")
+
+    # Build a compact representation of the questions being asked
+    questions_desc = []
+    for q in question_input.get("questions", []):
+        q_text = q.get("question", q.get("header", ""))
+        options = q.get("options", [])
+        options_text = "\n".join(
+            f"  - {o.get('label', '?')}: {o.get('description', '')}"
+            for o in options
+        )
+        if options_text:
+            questions_desc.append(f"Question: {q_text}\nOptions:\n{options_text}")
+        else:
+            questions_desc.append(f"Question: {q_text}")
+
+    questions_block = "\n\n".join(questions_desc)
+
+    # Count how many question rounds have already happened
+    question_rounds = sum(
+        1 for msg in conversation_so_far
+        if msg.get("role") == "tool"
+    )
+
+    # Build a minimal conversation summary (last few exchanges) to give context
+    recent = conversation_so_far[-6:] if len(conversation_so_far) > 6 else conversation_so_far
+    history_lines = []
+    for msg in recent:
+        role = msg.get("role", "?")
+        content = msg.get("content", "")
+        if content and isinstance(content, str):
+            # Truncate long messages
+            snippet = content[:300] + "..." if len(content) > 300 else content
+            history_lines.append(f"[{role}]: {snippet}")
+    history_block = "\n".join(history_lines) if history_lines else "(start of conversation)"
+
+    system_prompt = f"""You are simulating a user in a software development conversation.
+
+Your persona: {user_persona}
+
+Your goal for this conversation: {user_goal}
+
+Instructions:
+- You are answering questions from an AI coding agent that is helping you with a feature.
+- Read the questions and options carefully, then respond naturally as this user would.
+- If the questions have options, pick the option(s) that best match your goal, or provide
+  a short free-text answer if none fit perfectly.
+- Keep your answer concise (1-3 sentences). Do not explain your reasoning.
+- Write ONLY the user's response — no meta-commentary, no prefixes like "User:".
+- If the question is in a specific language (e.g. French), respond in that same language.
+- If the agent asks you to choose between implement/review/clarify/stop, pick the path
+  that your goal describes.
+- If the agent offers an option that matches a direction in your goal (e.g. "implement",
+  "review", "stop", "document"), pick that option explicitly by name.
+
+Context: This is question round #{question_rounds + 1} in the conversation."""
+
+    user_msg = f"""Recent conversation context:
+{history_block}
+
+The agent is now asking you:
+{questions_block}
+
+Respond as the user described above."""
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            max_tokens=256,
+            temperature=0.3,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_msg},
+            ],
+        )
+        answer = response.choices[0].message.content or "Proceed as you think best."
+        if verbose:
+            console.print(f"  [yellow]  ← simulated user: {answer[:100]}[/yellow]")
+        return answer.strip()
+    except Exception as e:
+        if verbose:
+            console.print(f"  [red]  ← user simulation failed: {e}[/red]")
+        return "Proceed as you think best."
 
 
 def run_agent(
@@ -624,6 +725,8 @@ def run_agent(
     skill_content: str,
     client: OpenAI,
     model: str,
+    user_client: OpenAI | None = None,
+    user_model: str | None = None,
     verbose: bool = False,
 ) -> tuple[list[dict], str]:
     """
@@ -631,6 +734,8 @@ def run_agent(
     Returns (tool_calls, full_text_output).
 
     Uses the OpenAI-compatible API (works with Anthropic, OpenRouter, ZenCode, etc.)
+    The simulated user is powered by user_client/user_model (defaults to the same
+    client/model as the agent if not specified).
     """
     setup = eval_data.get("setup", "")
     system = build_system_prompt(skill_content, setup)
@@ -642,13 +747,19 @@ def run_agent(
     all_tool_calls: list[dict] = []
     full_text = ""
 
-    simulated_responses = list(SIMULATED_USER_RESPONSES.get(eval_data["name"], []))
+    # Use the same client/model for user simulation unless overridden
+    effective_user_client = user_client or client
+    effective_user_model = user_model or model
 
-    # Convert tool schemas to OpenAI format
-    openai_tools = [
-        {"type": "function", "function": t}
-        for t in ALL_TOOLS
-    ]
+    # Convert tool schemas to OpenAI format (rename input_schema → parameters)
+    openai_tools = []
+    for t in ALL_TOOLS:
+        func_def = {
+            "name": t["name"],
+            "description": t["description"],
+            "parameters": t["input_schema"],
+        }
+        openai_tools.append({"type": "function", "function": func_def})
 
     for round_num in range(MAX_AGENTIC_ROUNDS):
         if verbose:
@@ -674,7 +785,8 @@ def run_agent(
         if msg.tool_calls:
             for tc in msg.tool_calls:
                 try:
-                    input_data = json.loads(tc.function.arguments)
+                    raw_args = tc.function.arguments
+                    input_data = json.loads(raw_args)
                     # Some models double-encode the arguments (JSON string inside JSON string).
                     # If parsing yields a string instead of a dict, try a second parse.
                     if isinstance(input_data, str):
@@ -726,10 +838,14 @@ def run_agent(
         # Build tool results
         for tc_entry in tool_uses:
             if tc_entry["name"] == "question":
-                if simulated_responses:
-                    user_answer = simulated_responses.pop(0)
-                else:
-                    user_answer = "Proceed as you think best."
+                user_answer = simulate_user_response(
+                    question_input=tc_entry["input"],
+                    eval_data=eval_data,
+                    conversation_so_far=messages,
+                    client=effective_user_client,
+                    model=effective_user_model,
+                    verbose=verbose,
+                )
                 result_content = user_answer
             else:
                 result_content = f"[{tc_entry['name']} executed successfully]"
@@ -860,9 +976,18 @@ def parse_args() -> argparse.Namespace:
         "-m",
         default=None,
         help=(
-            "Model to use. Overrides provider default. "
+            "Model to use for the agent. Overrides provider default. "
             "Examples: claude-opus-4-5, anthropic/claude-opus-4-5, "
             "openai/gpt-4o"
+        ),
+    )
+    parser.add_argument(
+        "--user-model",
+        default=None,
+        help=(
+            "Model to use for the simulated user. Defaults to the same model "
+            "as the agent. A smaller/cheaper model often works well here. "
+            "Example: openai/gpt-4.1-mini"
         ),
     )
     return parser.parse_args()
@@ -891,6 +1016,8 @@ def run_eval(
     skill_content: str,
     client: OpenAI,
     model: str,
+    user_client: OpenAI | None = None,
+    user_model: str | None = None,
     verbose: bool = False,
 ) -> EvalResult:
     """Run a single eval and return the result."""
@@ -898,7 +1025,8 @@ def run_eval(
 
     try:
         tool_calls, agent_output = run_agent(
-            eval_data, skill_content, client=client, model=model, verbose=verbose
+            eval_data, skill_content, client=client, model=model,
+            user_client=user_client, user_model=user_model, verbose=verbose
         )
 
         assertion_results = [
@@ -960,13 +1088,27 @@ def main() -> None:
     # Build LLM client
     provider = args.provider or detect_provider()
     client, model = build_client(provider, model_override=args.model)
-    console.print(f"[dim]Provider: {provider} / Model: {model}[/dim]\n")
+    console.print(f"[dim]Provider: {provider} / Model: {model}[/dim]")
+
+    # Build user simulation client (same provider, optionally different model)
+    user_client: OpenAI | None = None
+    user_model: str | None = args.user_model
+    if user_model:
+        # Use the same provider but potentially a different model
+        user_client, user_model = build_client(provider, model_override=user_model)
+        console.print(f"[dim]User sim: {provider} / {user_model}[/dim]")
+    else:
+        console.print(f"[dim]User sim: same as agent ({model})[/dim]")
+    console.print()
 
     results: list[EvalResult] = []
 
     for eval_data in evals:
         console.print(f"[bold]Running[/bold] [{eval_data['id']}] {eval_data['name']}...")
-        result = run_eval(eval_data, skill_content, client=client, model=model, verbose=args.verbose)
+        result = run_eval(
+            eval_data, skill_content, client=client, model=model,
+            user_client=user_client, user_model=user_model, verbose=args.verbose,
+        )
         results.append(result)
         render_eval_result(result)
         console.print()

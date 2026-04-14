@@ -39,3 +39,6 @@ Thumbs.db
 
 # Sources and attribution (local only — for adverse review)
 .sources
+
+# Successor handoff (local only — not committed)
+.successor
